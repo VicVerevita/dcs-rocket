@@ -35,13 +35,15 @@ function overviewFields(event, responses) {
 }
 
 function buildReminderMessage(event, leadDays, responses) {
-  const heading = leadDays === 7 && isLateEvent(event)
+  const heading = leadDays < 0
+    ? 'Event updated - please check your plans'
+    : leadDays === 7 && isLateEvent(event)
     ? 'New special event - sign up now'
     : `${leadDays} day${leadDays === 1 ? '' : 's'} away`;
   const embed = new EmbedBuilder()
     .setTitle(`🏁 ${event.title}`)
     .setDescription([
-      `**${gameLabel(event.game)} special event — ${heading}**`,
+      `**${gameLabel(event.game)} special event - ${heading}**`,
       `**When:** ${discordTimestamp(event.starts_at, event.date_only_until)}`,
       `**Track:** ${event.track}`,
       event.car_class ? `**Event class:** ${event.car_class}` : null,

@@ -4,9 +4,9 @@ Small Discord bot for iRacing and Le Mans Ultimate events.
 
 ## Commands
 
-- `/events` — show upcoming events, optionally filtered by game or event type.
-- `/add-event` — staff-only; opens a modal and stores an event in SQLite.
-- `/edit-event` and `/delete-event` — staff-only event management.
+- `/events` - show upcoming events, optionally filtered by game or event type.
+- `/add-event` - staff-only; opens a modal and stores an event in SQLite.
+- `/edit-event` and `/delete-event` - staff-only event management.
 
 ## Setup
 
@@ -28,7 +28,7 @@ REMINDER_CHANNELS=1180572129444507648:YOUR_IRACING_CHANNEL_ID:1,1180572129444507
 
 Leave it empty to disable reminders. The bot needs permission to view and send messages in each channel. No command redeployment is needed when changing reminder settings; restart the bot so it reads the new environment variable.
 
-For scheduled **Special Event** entries, the bot posts at or after 09:00 on the calendar dates 7, 3, and 1 days before the event start, using `DEFAULT_TIMEZONE`. A special event added less than seven days before it starts gets its first signup post immediately. The bot checks every five minutes and retries missed late announcements after a restart. It sends each stage once per channel and avoids another reminder on the announcement day. If the bot is offline all day for a later reminder, that day's reminder is skipped.
+For scheduled **Special Event** entries, the bot posts at or after 09:00 on the calendar dates 7, 3, and 1 days before the event start, using `DEFAULT_TIMEZONE`. A special event added less than seven days before it starts gets its first signup post immediately. The bot checks every five minutes and retries missed late announcements after a restart. It sends each stage once per channel and avoids another reminder on the announcement day. If the bot is offline all day for a later reminder, that day's reminder is skipped. Editing a future scheduled special event posts a new update reminder in its configured channels each time, even if the date does not change.
 
 Each post has buttons for drivers to say whether they are driving. LMU drivers select one or more of Friday, Saturday, and Sunday. iRacing drivers enter their Saturday availability hours for the 10:00 or 14:00 splits. Everyone can select multiple car classes. Reminder posts group drivers by day and class, and show iRacing availability beside each driver. Responses can be changed later. Special events need 1–10 comma-separated car classes to enable the checklist.
 

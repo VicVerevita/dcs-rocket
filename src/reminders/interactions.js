@@ -90,7 +90,7 @@ async function handleReminderModal(interaction) {
   });
   const { days, carClass, availabilityHours } = result.response;
   await interaction.reply({
-    content: `Saved for event #${event.id}: ${days} — ${carClass}${availabilityHours ? ` — ${availabilityHours}` : ''}. You can update your answer later.`,
+    content: `Saved for event #${event.id}: ${days} - ${carClass}${availabilityHours ? ` - ${availabilityHours}` : ''}. You can update your answer later.`,
     flags: MessageFlags.Ephemeral,
     allowedMentions: { parse: [] },
   });

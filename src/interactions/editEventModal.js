@@ -2,6 +2,7 @@ const { MessageFlags } = require('discord.js');
 const { editEvent, getEvent } = require('../db/eventRepository');
 const { parseEventFields } = require('../domain/eventInput');
 const { buildEventConfirmation } = require('../ui/eventMessages');
+const { publishEditedReminder } = require('../reminders/scheduler');
 
 async function handleEditEventModal(interaction) {
   const eventId = Number(interaction.customId.slice('edit-event:'.length));
@@ -51,6 +52,10 @@ async function handleEditEventModal(interaction) {
   }, 'updated');
 
   await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+
+  if (existing.event_type === 'special_event') {
+    await publishEditedReminder(interaction.client, eventId, interaction.guildId);
+  }
 }
 
 module.exports = { handleEditEventModal };

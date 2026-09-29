@@ -36,7 +36,7 @@ function buildEventForm({ game, eventType, event }) {
     .setTitle(editing ? `Edit Event #${event.id}` : 'Add racing event')
     .addComponents(
       field('title', 'Event name', 'GT3 Sprint at Spa', true, 100, TextInputStyle.Short, event?.title),
-      field('start', `Date, time or range — ${defaultTimeZone}`,
+      field('start', `Date, time or range - ${defaultTimeZone}`,
         '03.10.2026 10:00 or 03.10.2026 to 05.10.2026', true, 27,
         TextInputStyle.Short, event ? eventDateValue(event) : null),
       field('track', 'Track', 'Spa-Francorchamps', true, 100, TextInputStyle.Short, event?.track),
