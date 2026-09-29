@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1
 
 #
-# Build dependencies
+# Stage 1: install production dependencies
 #
-FROM node:22-bookworm-slim AS deps
+FROM node:22-bookworm-slim AS dependencies
 
 WORKDIR /app
 
-# better-sqlite3 is a native dependency.
-# These tools make the build reliable even if no prebuilt binary is available.
+# better-sqlite3 is a native Node module.
+# Install build tools here only, so they don't bloat the final image.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         python3 \
@@ -16,30 +16,37 @@ RUN apt-get update \
         g++ \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy these first so Docker can cache npm install
 COPY package.json package-lock.json ./
 
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev \
+    && npm cache clean --force
 
 
 #
-# Runtime
+# Stage 2: production runtime
 #
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim AS runtime
 
 ENV NODE_ENV=production
 
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
+# Production dependencies built in the previous stage
+COPY --from=dependencies --chown=node:node /app/node_modules ./node_modules
 
+# Application files
 COPY --chown=node:node package.json package-lock.json ./
 COPY --chown=node:node src ./src
 COPY --chown=node:node scripts ./scripts
+COPY --chown=node:node docker-entrypoint.sh ./docker-entrypoint.sh
 
-# Persistent SQLite location
+# SQLite database directory
 RUN mkdir -p /app/data \
-    && chown -R node:node /app/data
+    && chown -R node:node /app \
+    && chmod +x /app/docker-entrypoint.sh
 
+# Don't run the bot as root
 USER node
 
-CMD ["npm", "start"]
+ENTRYPOINT ["./docker-entrypoint.sh"]
