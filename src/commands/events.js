@@ -3,7 +3,7 @@ const {
   SlashCommandBuilder,
 } = require('discord.js');
 const { getUpcomingEvents } = require('../db/eventRepository');
-const { eventTypeChoices } = require('../utils/eventLabels');
+const { eventTypeChoices, gameChoices } = require('../utils/eventLabels');
 const { buildEventsOverview } = require('../ui/eventMessages');
 
 module.exports = {
@@ -14,10 +14,7 @@ module.exports = {
       option
         .setName('game')
         .setDescription('Filter by sim')
-        .addChoices(
-          { name: 'iRacing', value: 'iracing' },
-          { name: 'Le Mans Ultimate', value: 'lmu' },
-        ),
+        .addChoices(...gameChoices),
     )
     .addStringOption((option) =>
       option

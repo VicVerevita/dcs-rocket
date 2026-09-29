@@ -1,14 +1,14 @@
 const { MessageFlags } = require('discord.js');
 const { createEvent } = require('../db/eventRepository');
 const { parseEventFields } = require('../domain/eventInput');
-const { eventTypeChoices } = require('../utils/eventLabels');
+const { eventTypeChoices, gameChoices } = require('../utils/eventLabels');
 const { buildEventConfirmation } = require('../ui/eventMessages');
 const { publishLateReminder } = require('../reminders/scheduler');
 
 async function handleAddEventModal(interaction) {
   const [, game, eventType] = interaction.customId.split(':');
 
-  if (!['iracing', 'lmu'].includes(game) || !eventTypeChoices.some(({ value }) => value === eventType)) {
+  if (!gameChoices.some(({ value }) => value === game) || !eventTypeChoices.some(({ value }) => value === eventType)) {
     await interaction.reply({
       content: 'That event form is invalid or expired. Please run `/add-event` again.',
       flags: MessageFlags.Ephemeral,

@@ -1,5 +1,10 @@
+const gameChoices = [
+  { name: 'iRacing', value: 'iracing' },
+  { name: 'Le Mans Ultimate', value: 'lmu' },
+];
+
 function gameLabel(game) {
-  return game === 'iracing' ? 'iRacing' : 'Le Mans Ultimate';
+  return gameChoices.find(({ value }) => value === game)?.name || 'Unknown game';
 }
 
 const eventTypeChoices = [
@@ -21,6 +26,7 @@ function eventTypeLabel(eventType) {
 }
 
 module.exports = {
+  gameChoices,
   gameLabel,
   eventTypeChoices,
   eventTypeLabel,

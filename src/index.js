@@ -3,6 +3,7 @@ const {
   Events,
   GatewayIntentBits,
   MessageFlags,
+  Partials,
 } = require('discord.js');
 const { token, guildIds } = require('./config');
 const { loadCommands } = require('./loadCommands');
@@ -16,7 +17,8 @@ const allowedGuilds = new Set(guildIds);
 const commands = loadCommands();
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages],
+  partials: [Partials.Channel],
 });
 
 client.once(Events.ClientReady, (readyClient) => {
@@ -34,7 +36,10 @@ client.once(Events.ClientReady, (readyClient) => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
-    if (!interaction.guildId || !allowedGuilds.has(interaction.guildId)) {
+    const privateRsvp = !interaction.guildId
+      && (interaction.isButton() || interaction.isModalSubmit())
+      && interaction.customId?.startsWith('special-rsvp:');
+    if (!privateRsvp && (!interaction.guildId || !allowedGuilds.has(interaction.guildId))) {
       if (interaction.isRepliable()) {
         await interaction.reply({
           content: 'This bot is not configured for this server.',
@@ -76,7 +81,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     const response = {
       content: 'Something went wrong while handling that interaction.',
-      flags: MessageFlags.Ephemeral,
+      ...(interaction.guildId ? { flags: MessageFlags.Ephemeral } : {}),
     };
 
     if (interaction.replied || interaction.deferred) {

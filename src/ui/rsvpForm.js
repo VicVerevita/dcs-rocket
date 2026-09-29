@@ -21,7 +21,7 @@ function checkboxField(id, label, options, selected) {
   return new LabelBuilder().setLabel(label).setCheckboxGroupComponent(group);
 }
 
-function buildRsvpForm(event, previous) {
+function buildRsvpForm(event, previous, privateMessage = false) {
   const classes = eventClasses(event);
   const classField = checkboxField(
     'carClass', 'Car classes', classes,
@@ -48,7 +48,9 @@ function buildRsvpForm(event, previous) {
     );
   }
   return new ModalBuilder()
-    .setCustomId(`special-rsvp:submit:${event.id}`)
+    .setCustomId(privateMessage
+      ? `special-rsvp:submit:${event.guild_id}:${event.id}`
+      : `special-rsvp:submit:${event.id}`)
     .setTitle('Special event driver response')
     .addLabelComponents(scheduleField, classField);
 }

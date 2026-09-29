@@ -61,12 +61,44 @@ function buildReminderMessage(event, leadDays, responses) {
       .setLabel("I'm driving")
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
+      .setCustomId(`special-rsvp:remind_me_again:${event.id}`)
+      .setLabel("Remind me again")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
       .setCustomId(`special-rsvp:no:${event.id}`)
       .setLabel("Can't drive")
-      .setStyle(ButtonStyle.Secondary),
+      .setStyle(ButtonStyle.Danger)
   );
 
   return { embeds: [embed], components: [buttons], allowedMentions: { parse: [] } };
 }
 
-module.exports = { buildReminderMessage };
+function buildPrivateReminderMessage(event, response) {
+  const current = response?.attending
+    ? `Driving: ${response.days} - ${response.car_class}${response.availability_hours ? ` - ${response.availability_hours}` : ''}`
+    : response ? 'Not driving' : 'No response yet';
+  const embed = new EmbedBuilder()
+    .setTitle(`🏁 ${event.title} - your reminder`)
+    .setDescription([
+      `**${gameLabel(event.game)} special event**`,
+      `**When:** ${discordTimestamp(event.starts_at, event.date_only_until)}`,
+      `**Track:** ${event.track}`,
+      event.car_class ? `**Event classes:** ${event.car_class}` : null,
+      event.details ? `**Details:** ${event.details}` : null,
+      `**Your response:** ${current}`,
+      'Use the buttons below to update your response. The server overview will update too.',
+    ].filter(Boolean).join('\n'));
+  const buttons = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`special-rsvp:yes:${event.guild_id}:${event.id}`)
+      .setLabel("I'm driving")
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`special-rsvp:no:${event.guild_id}:${event.id}`)
+      .setLabel("Can't drive")
+      .setStyle(ButtonStyle.Danger),
+  );
+  return { embeds: [embed], components: [buttons], allowedMentions: { parse: [] } };
+}
+
+module.exports = { buildReminderMessage, buildPrivateReminderMessage };

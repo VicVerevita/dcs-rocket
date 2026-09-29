@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { eventTypeChoices } = require('../utils/eventLabels');
+const { eventTypeChoices, gameChoices } = require('../utils/eventLabels');
 const { buildEventForm } = require('../ui/eventForm');
 
 module.exports = {
@@ -11,10 +11,7 @@ module.exports = {
       .setName('game')
       .setDescription('Which sim is this event for?')
       .setRequired(true)
-      .addChoices(
-        { name: 'iRacing', value: 'iracing' },
-        { name: 'Le Mans Ultimate', value: 'lmu' },
-      ))
+      .addChoices(...gameChoices))
     .addStringOption((option) => option
       .setName('type')
       .setDescription('What kind of event is this?')

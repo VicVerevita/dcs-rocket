@@ -1,7 +1,7 @@
 const { DateTime } = require('luxon');
 const { defaultTimeZone } = require('../config');
 const { getEvent } = require('../db/eventRepository');
-const { reminderChannels } = require('./config');
+const { getReminderChannels, hasReminderChannels } = require('../db/reminderChannelRepository');
 const {
   getUpcomingSpecialEvents,
   getEventResponses,
@@ -12,6 +12,7 @@ const {
 } = require('./repository');
 const { buildReminderMessage } = require('./messages');
 const { isLateEvent, isSameLocalDay } = require('./timing');
+const { checkPrivateReminders } = require('./private');
 
 const LEAD_DAYS = [7, 3, 1];
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
@@ -52,7 +53,7 @@ async function publishLateReminder(client, eventId, guildId) {
   if (!event || event.event_type !== 'special_event' || event.status !== 'scheduled'
     || !isLateEvent(event) || now.toSeconds() >= event.starts_at) return;
 
-  for (const channel of reminderChannels.get(guildId) || []) {
+  for (const channel of getReminderChannels(guildId)) {
     if (channel.game && channel.game !== event.game) continue;
     const channelId = channel.key;
     if (LEAD_DAYS.some((days) => getReminderRecord(event.id, event.starts_at, days, channelId))) continue;
@@ -66,7 +67,7 @@ async function publishEditedReminder(client, eventId, guildId) {
   if (!event || event.event_type !== 'special_event' || event.status !== 'scheduled'
     || now.toSeconds() >= (event.date_only_until ?? event.starts_at)) return;
 
-  for (const channel of reminderChannels.get(guildId) || []) {
+  for (const channel of getReminderChannels(guildId)) {
     if (channel.game && channel.game !== event.game) continue;
     const leadDays = getNextEditLeadDays(event.id, event.starts_at, channel.key);
     await sendReminder(client, event, channel.key, leadDays, now);
@@ -78,8 +79,8 @@ async function checkReminders(client, now = DateTime.now().setZone(defaultTimeZo
   const today = now.toISODate();
 
   for (const event of getUpcomingSpecialEvents(Math.floor(now.toSeconds()))) {
-    const channels = reminderChannels.get(event.guild_id);
-    if (!channels) continue;
+    const channels = getReminderChannels(event.guild_id);
+    if (channels.length === 0) continue;
     const eventDay = DateTime.fromSeconds(event.starts_at, { zone: defaultTimeZone });
     const late = isLateEvent(event);
 
@@ -106,9 +107,8 @@ async function checkReminders(client, now = DateTime.now().setZone(defaultTimeZo
 }
 
 function startReminderScheduler(client) {
-  if (reminderChannels.size === 0) {
-    console.log('Special-event reminders disabled: REMINDER_CHANNELS is empty.');
-    return;
+  if (!hasReminderChannels()) {
+    console.log('Server reminders disabled: no reminder channels configured.');
   }
 
   let running = false;
@@ -119,6 +119,11 @@ function startReminderScheduler(client) {
       await checkReminders(client);
     } catch (error) {
       console.error('Special-event reminder check failed:', error);
+    }
+    try {
+      await checkPrivateReminders(client);
+    } catch (error) {
+      console.error('Private reminder check failed:', error);
     } finally {
       running = false;
     }

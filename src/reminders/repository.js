@@ -39,6 +39,39 @@ const reminderMessages = db.prepare(`
   WHERE event_id = ? AND starts_at = ?
 `);
 
+const deleteReminderMessage = db.prepare(`
+  DELETE FROM special_event_reminders
+  WHERE event_id = @eventId AND starts_at = @startsAt
+    AND lead_days = @leadDays AND channel_id = @channelId AND message_id = @messageId
+`);
+
+const upsertPrivateReminder = db.prepare(`
+  INSERT INTO special_event_private_reminders
+    (event_id, user_id, remind_at, requested_at, sent_at)
+  VALUES (@eventId, @userId, @remindAt, @requestedAt, NULL)
+  ON CONFLICT(event_id, user_id) DO UPDATE SET
+    remind_at = excluded.remind_at,
+    requested_at = excluded.requested_at,
+    sent_at = NULL
+`);
+
+const pendingPrivateReminders = db.prepare(`
+  SELECT r.event_id, r.user_id, r.remind_at, r.requested_at,
+         e.guild_id, e.game, e.event_type, e.title, e.starts_at,
+         e.date_only_until, e.track, e.car_class, e.details, e.created_at
+  FROM special_event_private_reminders r
+  JOIN events e ON e.id = r.event_id
+  WHERE r.sent_at IS NULL AND r.remind_at <= @now AND e.status = 'scheduled'
+    AND e.event_type = 'special_event'
+`);
+
+const markPrivateReminderSent = db.prepare(`
+  UPDATE special_event_private_reminders
+  SET sent_at = @sentAt
+  WHERE event_id = @eventId AND user_id = @userId
+    AND requested_at = @requestedAt AND sent_at IS NULL
+`);
+
 const eventResponses = db.prepare(`
   SELECT user_id, attending, days, car_class, availability_hours
   FROM special_event_responses
@@ -88,6 +121,22 @@ function getReminderMessages(eventId, startsAt) {
   return reminderMessages.all(eventId, startsAt);
 }
 
+function removeReminderMessage({ eventId, startsAt, leadDays, channelId, messageId }) {
+  deleteReminderMessage.run({ eventId, startsAt, leadDays, channelId, messageId });
+}
+
+function schedulePrivateReminder(reminder) {
+  upsertPrivateReminder.run(reminder);
+}
+
+function getPendingPrivateReminders(now) {
+  return pendingPrivateReminders.all({ now });
+}
+
+function recordPrivateReminderSent({ eventId, userId, requestedAt, sentAt }) {
+  markPrivateReminderSent.run({ eventId, userId, requestedAt, sentAt });
+}
+
 function getEventResponses(eventId) {
   return eventResponses.all(eventId);
 }
@@ -107,7 +156,11 @@ module.exports = {
   getLatestEditReminder,
   recordReminder,
   getReminderMessages,
+  removeReminderMessage,
   getEventResponses,
+  schedulePrivateReminder,
+  getPendingPrivateReminders,
+  recordPrivateReminderSent,
   getResponse,
   saveResponse,
 };

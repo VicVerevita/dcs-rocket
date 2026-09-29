@@ -85,6 +85,16 @@ db.exec(`
     PRIMARY KEY (event_id, starts_at, lead_days, channel_id)
   );
 
+  CREATE TABLE IF NOT EXISTS special_event_private_reminders (
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    remind_at INTEGER NOT NULL,
+    requested_at INTEGER NOT NULL,
+    sent_at INTEGER,
+    PRIMARY KEY (event_id, user_id)
+  );
+
+
   CREATE TABLE IF NOT EXISTS special_event_responses (
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     user_id TEXT NOT NULL,
@@ -122,6 +132,65 @@ if (reminderChannelColumn.pk === 0) {
       FROM old_special_event_reminders;
       DROP TABLE old_special_event_reminders;
     `);
+  })();
+}
+
+const privateReminderColumns = db.pragma('table_info(special_event_private_reminders)');
+const privateReminderNames = privateReminderColumns.map(({ name }) => name);
+const remindAtColumn = privateReminderColumns.find(({ name }) => name === 'remind_at');
+if (privateReminderNames.includes('lead_days') || !remindAtColumn?.notnull) {
+  const remindAt = privateReminderNames.includes('remind_at')
+    ? 'r.remind_at'
+    : privateReminderNames.includes('reminder_at') ? 'r.reminder_at' : null;
+  const legacyDue = privateReminderNames.includes('lead_days')
+    ? 'e.starts_at - r.lead_days * 86400'
+    : 'r.requested_at';
+  const dueExpression = remindAt ? `COALESCE(${remindAt}, ${legacyDue})` : legacyDue;
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE new_special_event_private_reminders (
+        event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL,
+        remind_at INTEGER NOT NULL,
+        requested_at INTEGER NOT NULL,
+        sent_at INTEGER,
+        PRIMARY KEY (event_id, user_id)
+      );
+      INSERT INTO new_special_event_private_reminders
+        (event_id, user_id, remind_at, requested_at, sent_at)
+      SELECT r.event_id, r.user_id, ${dueExpression},
+             r.requested_at, r.sent_at
+      FROM special_event_private_reminders r
+      JOIN events e ON e.id = r.event_id;
+      DROP TABLE special_event_private_reminders;
+      ALTER TABLE new_special_event_private_reminders RENAME TO special_event_private_reminders;
+    `);
+  })();
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_private_reminders_due ON special_event_private_reminders (sent_at, remind_at)');
+
+
+const reminderChannelsExist = db.prepare(`
+  SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'reminder_channels'
+`).get();
+if (!reminderChannelsExist) {
+  const { loadReminderChannels } = require('../reminders/config');
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE reminder_channels (
+        guild_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        game TEXT CHECK (game IN ('iracing', 'lmu') OR game IS NULL),
+        PRIMARY KEY (guild_id, channel_id)
+      );
+    `);
+    const insert = db.prepare(`
+      INSERT INTO reminder_channels (guild_id, channel_id, game)
+      VALUES (?, ?, ?)
+    `);
+    for (const [guildId, channels] of loadReminderChannels()) {
+      for (const channel of channels) insert.run(guildId, channel.key, channel.game);
+    }
   })();
 }
 

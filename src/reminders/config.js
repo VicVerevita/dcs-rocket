@@ -16,4 +16,4 @@ function loadReminderChannels(value = process.env.REMINDER_CHANNELS || '') {
   return channels;
 }
 
-module.exports = { reminderChannels: loadReminderChannels(), loadReminderChannels };
+module.exports = { loadReminderChannels };
