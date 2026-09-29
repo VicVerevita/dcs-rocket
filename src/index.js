@@ -8,6 +8,8 @@ const { token, guildIds } = require('./config');
 const { loadCommands } = require('./loadCommands');
 const { handleAddEventModal } = require('./interactions/addEventModal');
 const { handleEditEventModal } = require('./interactions/editEventModal');
+const { startReminderScheduler } = require('./reminders/scheduler');
+const { handleReminderButton, handleReminderModal } = require('./reminders/interactions');
 require('./db/database');
 
 const allowedGuilds = new Set(guildIds);
@@ -20,6 +22,7 @@ const client = new Client({
 client.once(Events.ClientReady, (readyClient) => {
   console.log(`Ready as ${readyClient.user.tag}`);
   console.log(`Allowed guilds: ${guildIds.join(', ')}`);
+  startReminderScheduler(readyClient);
 
   readyClient.user.setPresence({
     activities: [
@@ -55,6 +58,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith('edit-event:')) {
       await handleEditEventModal(interaction);
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('special-rsvp:')) {
+      await handleReminderButton(interaction);
+      return;
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('special-rsvp:submit:')) {
+      await handleReminderModal(interaction);
     }
   } catch (error) {
     console.error(error);

@@ -2,7 +2,7 @@ const db = require('../db/database');
 
 const upcomingEvents = db.prepare(`
   SELECT id, guild_id, game, title, starts_at, date_only_until,
-         track, car_class, details
+         track, car_class, details, created_at
   FROM events
   WHERE event_type = 'special_event'
     AND status = 'scheduled'
@@ -11,8 +11,8 @@ const upcomingEvents = db.prepare(`
 `);
 
 const sentReminder = db.prepare(`
-  SELECT 1 FROM special_event_reminders
-  WHERE event_id = ? AND starts_at = ? AND lead_days = ?
+  SELECT sent_at FROM special_event_reminders
+  WHERE event_id = ? AND starts_at = ? AND lead_days = ? AND channel_id = ?
 `);
 
 const insertReminder = db.prepare(`
@@ -21,20 +21,34 @@ const insertReminder = db.prepare(`
   VALUES (@eventId, @startsAt, @leadDays, @channelId, @messageId, @sentAt)
 `);
 
+const reminderMessages = db.prepare(`
+  SELECT lead_days, channel_id, message_id
+  FROM special_event_reminders
+  WHERE event_id = ? AND starts_at = ?
+`);
+
+const eventResponses = db.prepare(`
+  SELECT user_id, attending, days, car_class, availability_hours
+  FROM special_event_responses
+  WHERE event_id = ?
+  ORDER BY updated_at, user_id
+`);
+
 const existingResponse = db.prepare(`
-  SELECT attending, days, car_class
+  SELECT attending, days, car_class, availability_hours
   FROM special_event_responses
   WHERE event_id = ? AND user_id = ?
 `);
 
 const upsertResponse = db.prepare(`
   INSERT INTO special_event_responses
-    (event_id, user_id, attending, days, car_class, updated_at)
-  VALUES (@eventId, @userId, @attending, @days, @carClass, @updatedAt)
+    (event_id, user_id, attending, days, car_class, availability_hours, updated_at)
+  VALUES (@eventId, @userId, @attending, @days, @carClass, @availabilityHours, @updatedAt)
   ON CONFLICT(event_id, user_id) DO UPDATE SET
     attending = excluded.attending,
     days = excluded.days,
     car_class = excluded.car_class,
+    availability_hours = excluded.availability_hours,
     updated_at = excluded.updated_at
 `);
 
@@ -42,12 +56,20 @@ function getUpcomingSpecialEvents(now) {
   return upcomingEvents.all(now);
 }
 
-function wasReminderSent(eventId, startsAt, leadDays) {
-  return !!sentReminder.get(eventId, startsAt, leadDays);
+function getReminderRecord(eventId, startsAt, leadDays, channelId) {
+  return sentReminder.get(eventId, startsAt, leadDays, channelId);
 }
 
 function recordReminder(reminder) {
   insertReminder.run(reminder);
+}
+
+function getReminderMessages(eventId, startsAt) {
+  return reminderMessages.all(eventId, startsAt);
+}
+
+function getEventResponses(eventId) {
+  return eventResponses.all(eventId);
 }
 
 function getResponse(eventId, userId) {
@@ -60,8 +82,10 @@ function saveResponse(response) {
 
 module.exports = {
   getUpcomingSpecialEvents,
-  wasReminderSent,
+  getReminderRecord,
   recordReminder,
+  getReminderMessages,
+  getEventResponses,
   getResponse,
   saveResponse,
 };

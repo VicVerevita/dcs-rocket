@@ -1,10 +1,9 @@
-const {
-  EmbedBuilder,
-  MessageFlags,
-} = require('discord.js');
+const { MessageFlags } = require('discord.js');
 const { createEvent } = require('../db/eventRepository');
-const { parseEventDateTime, discordTimestamp } = require('../utils/time');
-const { gameLabel, eventTypeChoices, eventTypeLabel } = require('../utils/eventLabels');
+const { parseEventFields } = require('../domain/eventInput');
+const { eventTypeChoices } = require('../utils/eventLabels');
+const { buildEventConfirmation } = require('../ui/eventMessages');
+const { publishLateReminder } = require('../reminders/scheduler');
 
 async function handleAddEventModal(interaction) {
   const [, game, eventType] = interaction.customId.split(':');
@@ -17,28 +16,23 @@ async function handleAddEventModal(interaction) {
     return;
   }
 
-  const title = interaction.fields.getTextInputValue('title').trim();
-  const startInput = interaction.fields.getTextInputValue('start').trim();
-  const track = interaction.fields.getTextInputValue('track').trim();
-  const carClass = interaction.fields.getTextInputValue('carClass').trim() || null;
-  const details = interaction.fields.getTextInputValue('details').trim() || null;
-
-  const parsedStart = parseEventDateTime(startInput);
-  if (!parsedStart.ok) {
+  const parsed = parseEventFields(interaction.fields, eventType);
+  if (!parsed.ok) {
     await interaction.reply({
-      content: `Could not add the event: ${parsedStart.error}`,
+      content: `Could not add the event: ${parsed.error}`,
       flags: MessageFlags.Ephemeral,
     });
     return;
   }
+  const { title, startsAt, dateOnlyUntil, track, carClass, details } = parsed.event;
 
   const eventId = createEvent({
     guildId: interaction.guildId,
     game,
     eventType,
     title,
-    startsAt: parsedStart.unix,
-    dateOnlyUntil: parsedStart.dateOnlyUntil,
+    startsAt,
+    dateOnlyUntil,
     track,
     carClass,
     details,
@@ -46,26 +40,16 @@ async function handleAddEventModal(interaction) {
     createdAt: Math.floor(Date.now() / 1000),
   });
 
-  const embed = new EmbedBuilder()
-    .setTitle('✅ Event added')
-    .addFields(
-      { name: 'Event', value: `#${eventId} — ${title}` },
-      { name: 'Game', value: gameLabel(game), inline: true },
-      { name: 'Event type', value: eventTypeLabel(eventType), inline: true },
-      {
-        name: parsedStart.dateOnlyUntil === null ? 'When (your timezone)' : 'Date / date range',
-        value: discordTimestamp(parsedStart.unix, parsedStart.dateOnlyUntil),
-      },
-      { name: 'Track', value: track },
-    );
-
-  if (carClass) embed.addFields({ name: 'Car / Class', value: carClass });
-  if (details) embed.addFields({ name: 'Details', value: details });
+  const embed = buildEventConfirmation({ id: eventId, game, eventType, ...parsed.event }, 'added');
 
   await interaction.reply({
     embeds: [embed],
     flags: MessageFlags.Ephemeral,
   });
+
+  if (eventType === 'special_event') {
+    await publishLateReminder(interaction.client, eventId, interaction.guildId);
+  }
 }
 
 module.exports = { handleAddEventModal };

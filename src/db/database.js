@@ -82,7 +82,7 @@ db.exec(`
     channel_id TEXT NOT NULL,
     message_id TEXT NOT NULL,
     sent_at INTEGER NOT NULL,
-    PRIMARY KEY (event_id, starts_at, lead_days)
+    PRIMARY KEY (event_id, starts_at, lead_days, channel_id)
   );
 
   CREATE TABLE IF NOT EXISTS special_event_responses (
@@ -91,9 +91,38 @@ db.exec(`
     attending INTEGER NOT NULL CHECK (attending IN (0, 1)),
     days TEXT,
     car_class TEXT,
+    availability_hours TEXT,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (event_id, user_id)
   );
 `);
+
+if (!db.pragma('table_info(special_event_responses)').some(({ name }) => name === 'availability_hours')) {
+  db.exec('ALTER TABLE special_event_responses ADD COLUMN availability_hours TEXT');
+}
+
+const reminderChannelColumn = db.pragma('table_info(special_event_reminders)')
+  .find(({ name }) => name === 'channel_id');
+if (reminderChannelColumn.pk === 0) {
+  db.transaction(() => {
+    db.exec(`
+      ALTER TABLE special_event_reminders RENAME TO old_special_event_reminders;
+      CREATE TABLE special_event_reminders (
+        event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+        starts_at INTEGER NOT NULL,
+        lead_days INTEGER NOT NULL,
+        channel_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        sent_at INTEGER NOT NULL,
+        PRIMARY KEY (event_id, starts_at, lead_days, channel_id)
+      );
+      INSERT INTO special_event_reminders
+        (event_id, starts_at, lead_days, channel_id, message_id, sent_at)
+      SELECT event_id, starts_at, lead_days, channel_id, message_id, sent_at
+      FROM old_special_event_reminders;
+      DROP TABLE old_special_event_reminders;
+    `);
+  })();
+}
 
 module.exports = db;

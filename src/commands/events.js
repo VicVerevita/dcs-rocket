@@ -1,11 +1,10 @@
 const {
-  EmbedBuilder,
   MessageFlags,
   SlashCommandBuilder,
 } = require('discord.js');
 const { getUpcomingEvents } = require('../db/eventRepository');
-const { discordTimestamp } = require('../utils/time');
-const { gameLabel, eventTypeChoices, eventTypeLabel } = require('../utils/eventLabels');
+const { eventTypeChoices } = require('../utils/eventLabels');
+const { buildEventsOverview } = require('../ui/eventMessages');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -46,29 +45,7 @@ module.exports = {
       return;
     }
 
-    const embed = new EmbedBuilder()
-      .setTitle('🏁 Upcoming Racing Events')
-      .setDescription(
-        events
-          .map((event, index) => {
-            const carClass = event.car_class
-              ? `\n**Car / Class:** ${event.car_class}`
-              : '';
-            const details = event.details
-              ? `\n**Details:** ${event.details}`
-              : '';
-
-            return [
-              `### #${index + 1} — ${event.title}`,
-              `**${gameLabel(event.game)} • ${eventTypeLabel(event.event_type)}**`,
-              `**When:** ${discordTimestamp(event.starts_at, event.date_only_until)}`,
-              `**Track:** ${event.track}${carClass}${details}`,
-              `**ID:** ||${event.id}||`,
-            ].join('\n');
-          })
-          .join('\n\n'),
-      )
-      .setFooter({ text: `Showing the next ${events.length} event${events.length === 1 ? '' : 's'}` });
+    const embed = buildEventsOverview(events);
 
     await interaction.reply({ embeds: [embed] });
   },

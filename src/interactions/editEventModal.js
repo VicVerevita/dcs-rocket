@@ -1,6 +1,7 @@
-const { EmbedBuilder, MessageFlags } = require('discord.js');
-const { editEvent } = require('../db/eventRepository');
-const { parseEventDateTime, discordTimestamp } = require('../utils/time');
+const { MessageFlags } = require('discord.js');
+const { editEvent, getEvent } = require('../db/eventRepository');
+const { parseEventFields } = require('../domain/eventInput');
+const { buildEventConfirmation } = require('../ui/eventMessages');
 
 async function handleEditEventModal(interaction) {
   const eventId = Number(interaction.customId.slice('edit-event:'.length));
@@ -12,27 +13,27 @@ async function handleEditEventModal(interaction) {
     return;
   }
 
-  const title = interaction.fields.getTextInputValue('title').trim();
-  const startInput = interaction.fields.getTextInputValue('start').trim();
-  const track = interaction.fields.getTextInputValue('track').trim();
-  const carClass = interaction.fields.getTextInputValue('carClass').trim() || null;
-  const details = interaction.fields.getTextInputValue('details').trim() || null;
-
-  const parsedStart = parseEventDateTime(startInput);
-  if (!parsedStart.ok) {
+  const existing = getEvent({ eventId, guildId: interaction.guildId });
+  if (!existing) {
+    await interaction.reply({ content: `No event found with ID #${eventId}.`, flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const parsed = parseEventFields(interaction.fields, existing.event_type);
+  if (!parsed.ok) {
     await interaction.reply({
-      content: `Could not update the event: ${parsedStart.error}`,
+      content: `Could not update the event: ${parsed.error}`,
       flags: MessageFlags.Ephemeral,
     });
     return;
   }
+  const { title, startsAt, dateOnlyUntil, track, carClass, details } = parsed.event;
 
   const updated = editEvent({
     eventId,
     guildId: interaction.guildId,
     title,
-    startsAt: parsedStart.unix,
-    dateOnlyUntil: parsedStart.dateOnlyUntil,
+    startsAt,
+    dateOnlyUntil,
     track,
     carClass,
     details,
@@ -45,19 +46,9 @@ async function handleEditEventModal(interaction) {
     return;
   }
 
-  const embed = new EmbedBuilder()
-    .setTitle('✅ Event updated')
-    .addFields(
-      { name: 'Event', value: `#${eventId} — ${title}` },
-      {
-        name: parsedStart.dateOnlyUntil === null ? 'When (your timezone)' : 'Date / date range',
-        value: discordTimestamp(parsedStart.unix, parsedStart.dateOnlyUntil),
-      },
-      { name: 'Track', value: track },
-    );
-
-  if (carClass) embed.addFields({ name: 'Car / Class', value: carClass });
-  if (details) embed.addFields({ name: 'Details', value: details });
+  const embed = buildEventConfirmation({
+    id: eventId, game: existing.game, eventType: existing.event_type, ...parsed.event,
+  }, 'updated');
 
   await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
