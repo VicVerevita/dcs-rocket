@@ -2,6 +2,8 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('
 const { discordTimestamp } = require('../utils/time');
 const { gameLabel } = require('../utils/eventLabels');
 const { isLateEvent } = require('./timing');
+const { teamLabel } = require('../domain/teams');
+const { buildRsvpId } = require('./context');
 
 const { DAYS, selectedValues } = require('../domain/rsvp');
 
@@ -34,7 +36,7 @@ function overviewFields(event, responses) {
   return fields;
 }
 
-function buildReminderMessage(event, leadDays, responses) {
+function buildReminderMessage(event, leadDays, responses, team = '') {
   const heading = leadDays < 0
     ? 'Event updated - please check your plans'
     : leadDays === 7 && isLateEvent(event)
@@ -44,6 +46,7 @@ function buildReminderMessage(event, leadDays, responses) {
     .setTitle(`🏁 ${event.title}`)
     .setDescription([
       `**${gameLabel(event.game)} special event - ${heading}**`,
+      team ? `**Team:** ${teamLabel(team)}` : null,
       `**When:** ${discordTimestamp(event.starts_at, event.date_only_until)}`,
       `**Track:** ${event.track}`,
       event.car_class ? `**Event class:** ${event.car_class}` : null,
@@ -57,15 +60,15 @@ function buildReminderMessage(event, leadDays, responses) {
 
   const buttons = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`special-rsvp:yes:${event.id}`)
+      .setCustomId(buildRsvpId('yes', event, { team }))
       .setLabel("I'm driving")
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
-      .setCustomId(`special-rsvp:remind_me_again:${event.id}`)
+      .setCustomId(buildRsvpId('remind_me_again', event, { team }))
       .setLabel("Remind me again")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId(`special-rsvp:no:${event.id}`)
+      .setCustomId(buildRsvpId('no', event, { team }))
       .setLabel("Can't drive")
       .setStyle(ButtonStyle.Danger)
   );
@@ -73,7 +76,7 @@ function buildReminderMessage(event, leadDays, responses) {
   return { embeds: [embed], components: [buttons], allowedMentions: { parse: [] } };
 }
 
-function buildPrivateReminderMessage(event, response) {
+function buildPrivateReminderMessage(event, response, team = response?.team || '') {
   const current = response?.attending
     ? `Driving: ${response.days} - ${response.car_class}${response.availability_hours ? ` - ${response.availability_hours}` : ''}`
     : response ? 'Not driving' : 'No response yet';
@@ -81,6 +84,7 @@ function buildPrivateReminderMessage(event, response) {
     .setTitle(`🏁 ${event.title} - your reminder`)
     .setDescription([
       `**${gameLabel(event.game)} special event**`,
+      team ? `**Team:** ${teamLabel(team)}` : null,
       `**When:** ${discordTimestamp(event.starts_at, event.date_only_until)}`,
       `**Track:** ${event.track}`,
       event.car_class ? `**Event classes:** ${event.car_class}` : null,
@@ -90,11 +94,11 @@ function buildPrivateReminderMessage(event, response) {
     ].filter(Boolean).join('\n'));
   const buttons = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`special-rsvp:yes:${event.guild_id}:${event.id}`)
+      .setCustomId(buildRsvpId('yes', event, { team, privateMessage: true }))
       .setLabel("I'm driving")
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
-      .setCustomId(`special-rsvp:no:${event.guild_id}:${event.id}`)
+      .setCustomId(buildRsvpId('no', event, { team, privateMessage: true }))
       .setLabel("Can't drive")
       .setStyle(ButtonStyle.Danger),
   );

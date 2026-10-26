@@ -50,7 +50,7 @@ test('legacy private reminders migrate and accept new requests', () => {
     assert.equal(oldReminder.remind_at, 2000000000 - 3 * 86400);
     assert.deepEqual(
       db.pragma('table_info(special_event_private_reminders)').map(({ name }) => name),
-      ['event_id', 'user_id', 'remind_at', 'requested_at', 'sent_at'],
+      ['event_id', 'user_id', 'remind_at', 'requested_at', 'sent_at', 'team'],
     );
 
     schedulePrivateReminder({

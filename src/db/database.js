@@ -194,4 +194,16 @@ if (!reminderChannelsExist) {
   })();
 }
 
+// Additive migrations preserve existing channels, responses, and reminder history.
+for (const table of ['reminder_channels', 'special_event_reminders', 'special_event_responses', 'special_event_private_reminders']) {
+  if (!db.pragma(`table_info(${table})`).some(({ name }) => name === 'team')) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN team TEXT NOT NULL DEFAULT ''
+      CHECK (team IN ('', 'main', 'academy', 'community'))`);
+  }
+}
+
+if (!db.pragma('table_info(special_event_reminders)').some(({ name }) => name === 'author_id')) {
+  db.exec('ALTER TABLE special_event_reminders ADD COLUMN author_id TEXT');
+}
+
 module.exports = db;

@@ -14,7 +14,7 @@ function nextPrivateReminderAt(now = DateTime.now().setZone(defaultTimeZone)) {
   return Math.floor(now.plus({ days: 1 }).startOf('day').set({ hour: 9 }).toSeconds());
 }
 
-function requestPrivateReminder(event, userId, now = DateTime.now().setZone(defaultTimeZone)) {
+function requestPrivateReminder(event, userId, now = DateTime.now().setZone(defaultTimeZone), team = '') {
   const remindAt = nextPrivateReminderAt(now);
   if (remindAt >= (event.date_only_until ?? event.starts_at)) {
     return { ok: false, error: 'This event ends before tomorrow at 09:00, so a next-day reminder is unavailable.' };
@@ -24,6 +24,7 @@ function requestPrivateReminder(event, userId, now = DateTime.now().setZone(defa
     userId,
     remindAt,
     requestedAt: Date.now(),
+    team,
   });
   return { ok: true, remindAt };
 }
@@ -38,9 +39,11 @@ async function checkPrivateReminders(client, now = DateTime.now().setZone(defaul
     try {
       if (nowSeconds < (reminder.date_only_until ?? reminder.starts_at)) {
         const user = await client.users.fetch(reminder.user_id);
+        const response = getResponse(reminder.event_id, reminder.user_id);
         await user.send(buildPrivateReminderMessage(
           { ...reminder, id: reminder.event_id },
-          getResponse(reminder.event_id, reminder.user_id),
+          response,
+          response ? response.team : reminder.team,
         ));
       }
       recordPrivateReminderSent({

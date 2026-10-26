@@ -7,6 +7,8 @@ const {
   TextInputStyle,
 } = require('discord.js');
 const { DAYS, eventClasses, selectedValues } = require('../domain/rsvp');
+const { buildRsvpId } = require('../reminders/context');
+const { teamLabel } = require('../domain/teams');
 
 function checkboxField(id, label, options, selected) {
   const group = new CheckboxGroupBuilder()
@@ -21,7 +23,7 @@ function checkboxField(id, label, options, selected) {
   return new LabelBuilder().setLabel(label).setCheckboxGroupComponent(group);
 }
 
-function buildRsvpForm(event, previous, privateMessage = false) {
+function buildRsvpForm(event, previous, privateMessage = false, context = {}) {
   const classes = eventClasses(event);
   const classField = checkboxField(
     'carClass', 'Car classes', classes,
@@ -48,10 +50,8 @@ function buildRsvpForm(event, previous, privateMessage = false) {
     );
   }
   return new ModalBuilder()
-    .setCustomId(privateMessage
-      ? `special-rsvp:submit:${event.guild_id}:${event.id}`
-      : `special-rsvp:submit:${event.id}`)
-    .setTitle('Special event driver response')
+    .setCustomId(buildRsvpId('submit', event, { ...context, privateMessage }))
+    .setTitle(context.team ? `${teamLabel(context.team)} driver response` : 'Special event driver response')
     .addLabelComponents(scheduleField, classField);
 }
 
