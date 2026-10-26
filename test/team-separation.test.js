@@ -90,20 +90,30 @@ function buttonId(reply, index = 0) {
   return reply.components[0].components[index].data.custom_id;
 }
 
-test('reminders isolate each roster, share same-team channels, and keep an all-team overview', async () => {
+function teamRoster(embed, name, day = 'Saturday') {
+  const value = embed.fields.find((field) => field.name.includes(day.toUpperCase())).value;
+  const heading = `**${name} team**\n`;
+  assert.ok(value.includes(heading), `Missing ${name} team heading`);
+  return value.split(heading)[1].split(/\n\n(?=\*\*(?:Main|Academy|Community|Unassigned) team\*\*)/)[0];
+}
+
+test('every reminder channel shows the same event roster grouped by team', async () => {
   const s = scenario();
   for (const [user, team] of [['main-driver', 'main'], ['academy-driver', 'academy'], ['community-driver', 'community'], ['legacy-driver', '']]) {
     s.response(user, team);
   }
-  // The scheduled and late paths must use the same channel team and game filters.
+  // Scheduled and late posts share every team's roster while keeping game filters.
   await checkReminders(s.client);
   await publishLateReminder(s.client, s.eventId, '123');
   assert.equal(s.posts.size, 5);
   for (const [channelId, team] of [['101', 'main'], ['102', 'academy'], ['103', 'community'], ['105', 'main']]) {
     const embed = s.post(channelId);
-    assert.ok(embed.description.includes(`**Team:** ${team[0].toUpperCase() + team.slice(1)} team`));
-    assert.match(embed.fields[0].value, new RegExp(`<@${team}-driver>`));
-    assert.equal((embed.fields[0].value.match(/<@/g) || []).length, 1);
+    assert.ok(embed.description.includes(`**Signup team:** ${team[0].toUpperCase() + team.slice(1)} team`));
+    assert.deepEqual(embed.fields, s.post('104').fields);
+    for (const [name, user] of [['Main', 'main-driver'], ['Academy', 'academy-driver'], ['Community', 'community-driver'], ['Unassigned', 'legacy-driver']]) {
+      assert.match(teamRoster(embed, name), new RegExp(`<@${user}>`));
+      assert.equal((teamRoster(embed, name).match(/<@/g) || []).length, 1);
+    }
   }
   assert.equal((s.post('104').fields[0].value.match(/<@/g) || []).length, 4);
   assert.equal(getEventResponses(s.eventId).length, 4);
@@ -135,10 +145,11 @@ test('switching teams asks first, cancel preserves the signup, and accepting mov
   await handleReminderModal(submit);
   assert.equal(getEventResponses(s.eventId).length, 1);
   assert.equal(getResponse(s.eventId, 'driver').team, 'academy');
-  assert.equal(s.post('101').fields[0].value, 'No drivers yet.');
-  assert.equal(s.post('105').fields[0].value, 'No drivers yet.');
-  assert.match(s.post('102').fields[0].value, /<@driver>/);
-  assert.match(s.post('104').fields[0].value, /<@driver>/);
+  for (const channelId of ['101', '102', '103', '104', '105']) {
+    assert.equal(teamRoster(s.post(channelId), 'Main'), 'No drivers yet.');
+    assert.match(teamRoster(s.post(channelId), 'Academy'), /<@driver>/);
+    assert.deepEqual(s.post(channelId).fields, s.post('104').fields);
+  }
 
   // A confirmation cannot be reused to switch the record a second time.
   const reused = s.interaction(confirm.customId, '102');
@@ -153,8 +164,8 @@ test('switching teams asks first, cancel preserves the signup, and accepting mov
   assert.equal(getResponse(s.eventId, 'driver').team, 'main');
   assert.equal(getResponse(s.eventId, 'driver').attending, 0);
   assert.equal(getEventResponses(s.eventId).length, 1);
-  assert.equal(s.post('101').fields.at(-1).value, '1');
-  assert.equal(s.post('102').fields.at(-1).value, '0');
+  assert.equal(s.post('101').fields.at(-1).value, '1\n||<@driver>||');
+  assert.equal(s.post('102').fields.at(-1).value, '1\n||<@driver>||');
 });
 
 test('new and legacy server buttons select the channel team for both games', async () => {
@@ -224,22 +235,35 @@ test('DM signups retain their originating team and old DMs follow the single sig
   assert.equal(getResponse(s.eventId, 'driver').team, 'main');
   assert.equal(getResponse(s.eventId, 'driver').attending, 0);
   assert.equal(getEventResponses(s.eventId).length, 1);
+  assert.equal(s.post('101').fields.at(-1).value, '1\n||<@driver>||');
+  assert.equal(s.post('102').fields.at(-1).value, '1\n||<@driver>||');
+
+  // Changing back to driving removes the driver from every channel's spoiler list.
+  const drivingAgain = s.interaction(buildRsvpId('yes', s.event, { team: 'main' }));
+  await handleReminderButton(drivingAgain);
+  await handleReminderModal(s.interaction(drivingAgain.modals[0].custom_id));
+  assert.equal(s.post('101').fields.at(-1).value, '0');
+  assert.equal(s.post('102').fields.at(-1).value, '0');
+  assert.match(teamRoster(s.post('101'), 'Main'), /<@driver>/);
 });
 
-test('assigning a team refreshes old shared posts and removed channels keep their last roster scope', async () => {
+test('changing a channel team keeps the combined roster and updates its signup context', async () => {
   const s = scenario();
   s.response('main-driver', 'main');
   s.response('academy-driver', 'academy');
   await publishEditedReminder(s.client, s.eventId, '123');
   assert.match(s.post('104').fields[0].value, /academy-driver/);
+  const previousFields = s.post('104').fields;
   setReminderChannel('123', '104', 'iracing', 'main');
   assert.deepEqual(await refreshChannelReminderMessages(s.client, '123', '104'), { failures: 0, skippedForeign: 0 });
-  assert.doesNotMatch(s.post('104').fields[0].value, /academy-driver/);
+  assert.deepEqual(s.post('104').fields, previousFields);
+  assert.match(s.post('104').description, /\*\*Signup team:\*\* Main team/);
 
   removeReminderChannel('123', '104');
   await handleReminderButton(s.interaction(`special-rsvp:no:${s.eventId}`, '101', 'main-driver'));
-  assert.equal(s.post('104').fields[0].value, 'No drivers yet.');
-  assert.equal(s.post('104').fields.at(-1).value, '1');
+  assert.equal(teamRoster(s.post('104'), 'Main'), 'No drivers yet.');
+  assert.match(teamRoster(s.post('104'), 'Academy'), /<@academy-driver>/);
+  assert.equal(s.post('104').fields.at(-1).value, '1\n||<@main-driver>||');
 });
 
 test('reminder delivery ignores copied events and channels outside the configured guilds', async () => {

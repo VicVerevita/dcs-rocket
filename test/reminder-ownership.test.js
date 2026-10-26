@@ -87,7 +87,7 @@ test('changing a shared channel to Main skips posts by another bot and refreshes
   assert.deepEqual(result, { failures: 0, skippedForeign: 1 });
   assert.equal(getReminderChannels('123')[0].team, 'main');
   assert.deepEqual(client.edited.map(({ messageId }) => messageId), ['own-message']);
-  assert.match(client.edited[0].message.embeds[0].toJSON().description, /\*\*Team:\*\* Main team/);
+  assert.match(client.edited[0].message.embeds[0].toJSON().description, /\*\*Signup team:\*\* Main team/);
   assert.deepEqual(getEventResponses(s.eventId), beforeResponses);
   assert.equal(getReminderMessages(s.eventId).length, 2);
   assert.ok(getReminderRecord(s.eventId, s.startsAt, 7, '456'));

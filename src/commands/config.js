@@ -73,7 +73,7 @@ module.exports = {
     if (action === 'list') {
       const channels = getReminderChannels(interaction.guildId);
       return reply(channels.length
-        ? channels.slice(0, 25).map(({ key, game, team }) => `<#${key}> — ${game ? gameLabel(game) : 'Both games'} — ${teamLabel(team)}`).join('\n')
+        ? channels.slice(0, 25).map(({ key, game, team }) => `<#${key}> - ${game ? gameLabel(game) : 'Both games'} - ${teamLabel(team)}`).join('\n')
           + (channels.length > 25 ? `\n…and ${channels.length - 25} more configured channels.` : '')
         : 'No reminder channels configured. Use `/config reminders set` to add one.');
     }
@@ -114,7 +114,7 @@ module.exports = {
       team === 'all' ? '' : team ?? undefined);
     const selected = getReminderChannels(interaction.guildId).find(({ key }) => key === channel.id);
     const { failures, skippedForeign } = await refreshChannelReminderMessages(interaction.client, interaction.guildId, channel.id);
-    return interaction.editReply(`Reminders for ${game === 'both' ? 'both games' : gameLabel(game)} will post in <#${channel.id}> — ${teamLabel(selected.team)}.`
+    return interaction.editReply(`Reminders for ${game === 'both' ? 'both games' : gameLabel(game)} will post in <#${channel.id}> - ${teamLabel(selected.team)}.`
       + (skippedForeign ? ` Skipped ${skippedForeign} existing reminder post${skippedForeign === 1 ? '' : 's'} created by another bot; this bot can only update its own posts.` : '')
       + (failures ? ' Settings were saved, but some existing posts could not be refreshed. Check the bot logs for details.' : ''));
   },

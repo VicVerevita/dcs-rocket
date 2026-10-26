@@ -88,7 +88,7 @@ async function refreshReminderMessages(client, event, channelId) {
         continue;
       }
       await message.edit(buildReminderMessage(
-        event, reminder.lead_days, getEventResponses(event.id, team), team,
+        event, reminder.lead_days, getEventResponses(event.id), team,
       ));
     } catch (error) {
       if (error.code === 10008) {

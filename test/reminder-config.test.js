@@ -86,8 +86,8 @@ test('staff configures game-specific channels and scheduler uses changes immedia
 
   const list = makeInteraction('list');
   await config.execute(list);
-  assert.match(list.replies.at(-1).content, /<#456> — iRacing/);
-  assert.match(list.replies.at(-1).content, /<#789> — Le Mans Ultimate/);
+  assert.match(list.replies.at(-1).content, /<#456> - iRacing/);
+  assert.match(list.replies.at(-1).content, /<#789> - Le Mans Ultimate/);
 
   const now = Math.floor(Date.now() / 1000);
   const startsAt = now + 30 * 86400;
@@ -135,7 +135,7 @@ test('team assignments are optional, validated, listed, and preserved on game ch
 
   const list = makeInteraction('list');
   await config.execute(list);
-  assert.match(list.replies.at(-1).content, /<#789> — Both games — Academy team/);
+  assert.match(list.replies.at(-1).content, /<#789> - Both games - Academy team/);
 
   await config.execute(makeInteraction('set', '789', 'both', true, true, 'all'));
   assert.deepEqual(getReminderChannels('123'), [{ key: '789', game: null, team: '' }]);
@@ -200,6 +200,6 @@ test('editing All teams to Main confirms the saved setting and skips original-bo
   assert.doesNotMatch(set.replies.at(-1).content, /could not be refreshed/);
   assert.deepEqual(fetched, ['own']);
   assert.equal(edited.length, 1);
-  assert.match(edited[0].embeds[0].toJSON().description, /\*\*Team:\*\* Main team/);
+  assert.match(edited[0].embeds[0].toJSON().description, /\*\*Signup team:\*\* Main team/);
   assert.equal(getReminderMessages(eventId).length, 2);
 });

@@ -30,7 +30,7 @@ async function sendReminder(client, event, channelId, leadDays, now, team = '') 
       throw new Error(`Configured channel ${channelId} is not a text channel in guild ${event.guild_id}`);
     }
     const message = await channel.send(buildReminderMessage(
-      event, leadDays, getEventResponses(event.id, team), team,
+      event, leadDays, getEventResponses(event.id), team,
     ));
     recordReminder({
       eventId: event.id,

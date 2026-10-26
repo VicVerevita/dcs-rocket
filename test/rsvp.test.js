@@ -47,7 +47,7 @@ test('iRacing form asks for Saturday hours and shows them in the overview', () =
     car_class: result.response.carClass, availability_hours: result.response.availabilityHours,
   }]);
   const overview = message.embeds[0].toJSON().fields;
-  assert.equal(overview[0].name, 'Saturday');
+  assert.equal(overview[0].name, '────── SATURDAY ──────');
   assert.match(overview[0].value, /\*\*GT3\*\*[\s\S]*<@123> \(10:00 or 14:00\)/);
   assert.match(overview[0].value, /\*\*GTP\*\*/);
 });
