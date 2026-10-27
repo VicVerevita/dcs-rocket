@@ -20,7 +20,7 @@ const { setReminderChannel } = require('../src/db/reminderChannelRepository');
 const {
   getEventResponses, getReminderMessages, getReminderRecord, recordReminder, saveResponse,
 } = require('../src/reminders/repository');
-const { checkReminders, publishEditedReminder, publishLateReminder } = require('../src/reminders/scheduler');
+const { checkReminders, publishChannelReminders, publishEditedReminder, publishLateReminder } = require('../src/reminders/scheduler');
 const { refreshChannelReminderMessages } = require('../src/reminders/interactions');
 
 beforeEach(() => {
@@ -104,6 +104,27 @@ async function captureErrors(run) {
   return errors;
 }
 
+function assertHereNotification(payload) {
+  assert.equal(payload.content, '@here');
+  assert.deepEqual(payload.allowedMentions, { parse: ['everyone'] });
+}
+
+test('an initial channel announcement mentions here and refreshing it stays silent', async () => {
+  const race = event();
+  const d = discord();
+  assert.deepEqual(await publishChannelReminders(d.client, '123', '456'), { sent: 1, failures: 0 });
+  assertHereNotification(d.posts.get('new-1').payload);
+  assert.ok(getReminderRecord(race.eventId, race.startsAt, 0, '456'));
+
+  await refreshChannelReminderMessages(d.client, '123', '456');
+  const refreshed = d.posts.get('new-1').payload;
+  assert.deepEqual(refreshed.allowedMentions, { parse: [] });
+  assert.equal(Object.hasOwn(refreshed, 'content'), false);
+  assert.deepEqual(d.actions.filter(([action]) => action !== 'fetch'), [
+    ['send', '456', 'new-1'], ['edit', '456', 'new-1'],
+  ]);
+});
+
 test('scheduled stages replace the previous post, preserve responses, and stay deduplicated after restart', async () => {
   const race = event();
   const d = discord();
@@ -121,6 +142,7 @@ test('scheduled stages replace the previous post, preserve responses, and stay d
     assert.deepEqual(getReminderMessages(race.eventId).map(({ message_id }) => message_id), [messageId]);
     assert.ok(getReminderRecord(race.eventId, race.startsAt, leadDays, '456'));
     assert.match(post.payload.embeds[0].toJSON().fields[0].value, /<@driver> \(14:00\)/);
+    assertHereNotification(post.payload);
   }
   assert.deepEqual(d.actions.filter(([action]) => action !== 'fetch'), [
     ['send', '456', 'new-1'], ['send', '456', 'new-2'], ['delete', '456', 'new-1'],
@@ -149,12 +171,15 @@ test('scheduled stages replace the previous post, preserve responses, and stay d
   d.actions.length = 0;
   assert.deepEqual(await refreshChannelReminderMessages(d.client, '123', '456'), { failures: 0, skippedForeign: 0 });
   assert.deepEqual(d.actions, [['fetch', '456', 'new-3'], ['edit', '456', 'new-3']]);
+  assert.deepEqual(d.posts.get('new-3').payload.allowedMentions, { parse: [] });
+  assert.equal(Object.hasOwn(d.posts.get('new-3').payload, 'content'), false);
 });
 
 test('a late announcement is replaced without recreating its deleted initial stage', async () => {
   const race = event(true);
   const d = discord();
   await publishLateReminder(d.client, race.eventId, '123');
+  assertHereNotification(d.posts.get('new-1').payload);
   const tick = race.start.minus({ days: 1 }).set({ hour: 9 });
   await checkReminders(d.client, tick);
   await publishLateReminder(d.client, race.eventId, '123');
@@ -180,6 +205,7 @@ test('date changes replace all older posts for that event in each configured cha
   }), true);
   await publishEditedReminder(d.client, race.eventId, '123');
   assert.deepEqual([...d.posts.keys()].sort(), ['new-1', 'new-2', 'other-event', 'removed-channel']);
+  for (const id of ['new-1', 'new-2']) assertHereNotification(d.posts.get(id).payload);
   assert.deepEqual(getReminderMessages(race.eventId, race.startsAt + 86400)
     .map(({ channel_id }) => channel_id).sort(), ['456', '789']);
   assert.ok(getReminderRecord(race.eventId, race.startsAt, 7, '456'));
