@@ -15,7 +15,7 @@ process.env.DEFAULT_TIMEZONE = 'Europe/Berlin';
 
 const db = require('../src/db/database');
 const { createEvent } = require('../src/db/eventRepository');
-const { recordReminder, getResponse } = require('../src/reminders/repository');
+const { recordReminder, getReminderRecord, getResponse } = require('../src/reminders/repository');
 const { handleReminderButton, handleReminderModal } = require('../src/reminders/interactions');
 const { checkPrivateReminders, nextPrivateReminderAt } = require('../src/reminders/private');
 
@@ -134,6 +134,7 @@ test('deleted server reminders are removed while other messages still refresh', 
   assert.equal(fetched.filter((id) => id === 'existing').length, 2);
   assert.equal(edited.length, 2);
   assert.deepEqual(db.prepare(`
-    SELECT message_id FROM special_event_reminders WHERE event_id = ?
+    SELECT message_id FROM special_event_reminders WHERE event_id = ? AND deleted_at IS NULL
   `).all(eventId).map(({ message_id }) => message_id), ['existing']);
+  assert.ok(getReminderRecord(eventId, startsAt, 7, '456'));
 });

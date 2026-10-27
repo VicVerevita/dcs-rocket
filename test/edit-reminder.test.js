@@ -14,13 +14,14 @@ process.env.DATABASE_PATH = path.join(directory, 'events.sqlite');
 const db = require('../src/db/database');
 const { createEvent, editEvent, getEvent } = require('../src/db/eventRepository');
 const { publishEditedReminder, checkReminders } = require('../src/reminders/scheduler');
+const { getReminderMessages } = require('../src/reminders/repository');
 
 after(() => {
   db.close();
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
-test('editing a scheduled special event posts a fresh reminder each time', async () => {
+test('editing a scheduled special event replaces its reminder each time', async () => {
   const now = Math.floor(Date.now() / 1000);
   const startsAt = now + 30 * 24 * 60 * 60;
   const eventId = createEvent({
@@ -29,12 +30,16 @@ test('editing a scheduled special event posts a fresh reminder each time', async
     createdBy: 'staff', createdAt: now,
   });
   const sent = [];
+  const deleted = [];
   const client = { channels: { fetch: async () => ({
     guildId: '123', isTextBased: () => true,
     send: async (message) => {
       sent.push(message);
       return { id: String(sent.length) };
     },
+    messages: { fetch: async (messageId) => ({
+      delete: async () => { deleted.push(messageId); },
+    }) },
   }) } };
 
   for (const title of ['Race revised', 'Race revised again']) {
@@ -47,6 +52,8 @@ test('editing a scheduled special event posts a fresh reminder each time', async
 
   assert.equal(getEvent({ eventId, guildId: '123' }).status, 'scheduled');
   assert.equal(sent.length, 2);
+  assert.deepEqual(deleted, ['1']);
+  assert.deepEqual(getReminderMessages(eventId).map(({ message_id }) => message_id), ['2']);
   assert.match(sent[1].embeds[0].toJSON().description, /Event updated/);
   assert.deepEqual(db.prepare(`
     SELECT lead_days FROM special_event_reminders WHERE event_id = ? ORDER BY lead_days DESC

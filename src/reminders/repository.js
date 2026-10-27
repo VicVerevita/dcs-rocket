@@ -37,16 +37,17 @@ const reminderMessages = db.prepare(`
   SELECT lead_days, channel_id, message_id, team, starts_at, author_id
   FROM special_event_reminders
   WHERE event_id = @eventId AND (@startsAt IS NULL OR starts_at = @startsAt)
+    AND deleted_at IS NULL
 `);
 
 const channelReminderEvents = db.prepare(`
   SELECT DISTINCT e.* FROM events e
   JOIN special_event_reminders r ON r.event_id = e.id
-  WHERE e.guild_id = ? AND r.channel_id = ?
+  WHERE e.guild_id = ? AND r.channel_id = ? AND r.deleted_at IS NULL
 `);
 
-const deleteReminderMessage = db.prepare(`
-  DELETE FROM special_event_reminders
+const markReminderMessageDeleted = db.prepare(`
+  UPDATE special_event_reminders SET deleted_at = @deletedAt
   WHERE event_id = @eventId AND starts_at = @startsAt
     AND lead_days = @leadDays AND channel_id = @channelId AND message_id = @messageId
 `);
@@ -140,7 +141,10 @@ function getChannelReminderEvents(guildId, channelId) {
 }
 
 function removeReminderMessage({ eventId, startsAt, leadDays, channelId, messageId }) {
-  deleteReminderMessage.run({ eventId, startsAt, leadDays, channelId, messageId });
+  // A deleted Discord message still counts as a delivered reminder stage.
+  markReminderMessageDeleted.run({
+    eventId, startsAt, leadDays, channelId, messageId, deletedAt: Math.floor(Date.now() / 1000),
+  });
 }
 
 function recordReminderAuthor({ eventId, startsAt, leadDays, channelId, messageId, authorId }) {

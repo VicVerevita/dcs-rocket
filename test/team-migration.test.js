@@ -11,7 +11,7 @@ process.env.GUILD_IDS = '123';
 process.env.REMINDER_CHANNELS = '123:456:1';
 process.env.DATABASE_PATH = path.join(directory, 'events.sqlite');
 
-test('team upgrade preserves all data and reminder deduplication across repeated starts', async () => {
+test('schema upgrades preserve all data and reminder deduplication across repeated starts', async () => {
   const databaseModule = require.resolve('../src/db/database');
   let db = require(databaseModule);
   const now = Math.floor(Date.now() / 1000);
@@ -23,6 +23,7 @@ test('team upgrade preserves all data and reminder deduplication across repeated
       db.exec(`ALTER TABLE ${table} DROP COLUMN team`);
     }
     db.exec('ALTER TABLE special_event_reminders DROP COLUMN author_id');
+    db.exec('ALTER TABLE special_event_reminders DROP COLUMN deleted_at');
     db.prepare(`
       INSERT INTO events
         (id, guild_id, game, event_type, title, starts_at, track, car_class, status, created_by, created_at)
@@ -51,9 +52,11 @@ test('team upgrade preserves all data and reminder deduplication across repeated
       db = require(databaseModule);
       for (const table of tables) {
         const rows = db.prepare(`SELECT * FROM ${table}`).all();
-        assert.deepEqual(rows.map(({ team, author_id, ...row }) => row), before.get(table), table);
+        assert.deepEqual(rows.map(({ team, author_id, deleted_at, ...row }) => row), before.get(table), table);
         if (table !== 'events') assert.ok(rows.every(({ team }) => team === ''), table);
-        if (table === 'special_event_reminders') assert.ok(rows.every(({ author_id }) => author_id === null));
+        if (table === 'special_event_reminders') {
+          assert.ok(rows.every(({ author_id, deleted_at }) => author_id === null && deleted_at === null));
+        }
       }
       assert.deepEqual(db.pragma('foreign_key_check'), []);
     }

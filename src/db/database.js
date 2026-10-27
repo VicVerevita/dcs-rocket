@@ -206,4 +206,8 @@ if (!db.pragma('table_info(special_event_reminders)').some(({ name }) => name ==
   db.exec('ALTER TABLE special_event_reminders ADD COLUMN author_id TEXT');
 }
 
+if (!db.pragma('table_info(special_event_reminders)').some(({ name }) => name === 'deleted_at')) {
+  db.exec('ALTER TABLE special_event_reminders ADD COLUMN deleted_at INTEGER');
+}
+
 module.exports = db;

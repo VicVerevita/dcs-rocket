@@ -5,10 +5,13 @@ const { getReminderChannels, hasReminderChannels } = require('../db/reminderChan
 const {
   getUpcomingSpecialEvents,
   getEventResponses,
+  getReminderMessages,
   getReminderRecord,
   getNextEditLeadDays,
   getLatestEditReminder,
   recordReminder,
+  recordReminderAuthor,
+  removeReminderMessage,
 } = require('./repository');
 const { buildReminderMessage } = require('./messages');
 const { isLateEvent, isSameLocalDay } = require('./timing');
@@ -18,6 +21,43 @@ const LEAD_DAYS = [7, 3, 1];
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const SEND_HOUR = 9;
 const inFlight = new Set();
+
+async function deletePreviousReminders(client, eventId, channel, channelId, messageId) {
+  const botId = client.user?.id;
+  for (const reminder of getReminderMessages(eventId)) {
+    if (reminder.channel_id !== channelId || reminder.message_id === messageId) continue;
+    if (botId && reminder.author_id && reminder.author_id !== botId) continue;
+    const record = {
+      eventId,
+      startsAt: reminder.starts_at,
+      leadDays: reminder.lead_days,
+      channelId,
+      messageId: reminder.message_id,
+    };
+    try {
+      const previous = await channel.messages.fetch(reminder.message_id);
+      const authorId = previous.author?.id;
+      if (authorId && authorId !== reminder.author_id) {
+        recordReminderAuthor({ ...record, authorId });
+      }
+      if (botId && authorId && authorId !== botId) continue;
+      await previous.delete();
+      removeReminderMessage(record);
+    } catch (error) {
+      if (error.code === 10008) {
+        removeReminderMessage(record);
+        continue;
+      }
+      console.error('Could not delete previous reminder:', {
+        eventId,
+        channelId,
+        messageId: reminder.message_id,
+        code: error.code,
+        message: error.message,
+      });
+    }
+  }
+}
 
 async function sendReminder(client, event, channelId, leadDays, now, team = '') {
   const key = `${event.id}:${event.starts_at}:${leadDays}:${channelId}`;
@@ -42,6 +82,7 @@ async function sendReminder(client, event, channelId, leadDays, now, team = '') 
       sentAt: Math.floor(now.toSeconds()),
       team,
     });
+    await deletePreviousReminders(client, event.id, channel, channelId, message.id);
   } catch (error) {
     console.error(`Could not send ${leadDays}-day reminder for event #${event.id} in channel ${channelId}:`, error);
   } finally {
