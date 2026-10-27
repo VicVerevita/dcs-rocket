@@ -24,6 +24,7 @@ const channelPermissions = new PermissionsBitField([
   PermissionFlagsBits.ViewChannel,
   PermissionFlagsBits.SendMessages,
   PermissionFlagsBits.EmbedLinks,
+  PermissionFlagsBits.MentionEveryone,
 ]);
 
 function makeInteraction(action, channelId = '789', game = 'lmu', permitted = true, canPost = true, team = null) {
@@ -94,6 +95,7 @@ test('staff configures game-specific channels and scheduler uses changes immedia
   const set = makeInteraction('set');
   await config.execute(set);
   assert.equal(set.replies[0].flags, MessageFlags.Ephemeral);
+  assert.doesNotMatch(set.replies.at(-1).content, /To enable @here notifications/);
   assert.deepEqual(getReminderChannels('123'), [
     { key: '456', game: 'iracing', team: '' },
     { key: '789', game: 'lmu', team: '' },
@@ -294,4 +296,25 @@ test('a failed initial announcement saves channel settings and repeating the com
   assert.equal(getReminderMessages(eventId)[0].team, 'community');
   assert.match(interaction.replies.at(-1).content, /Posted 1 reminder/);
   assert.doesNotMatch(interaction.replies.at(-1).content, /could not be sent/);
+});
+
+test('missing mention permission explains how to enable here notifications without blocking reminders', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const eventId = createEvent({
+    guildId: '123', game: 'lmu', eventType: 'special_event', title: 'Notification race',
+    startsAt: now + 30 * 86400, dateOnlyUntil: null, track: 'Spa', carClass: 'GT3',
+    details: null, createdBy: 'staff', createdAt: now,
+  });
+  const interaction = makeInteraction('set', '904', 'lmu');
+  interaction.options.getChannel().permissionsFor = () => new PermissionsBitField(channelPermissions)
+    .remove(PermissionFlagsBits.MentionEveryone);
+
+  await config.execute(interaction);
+
+  assert.equal(getReminderChannels('123').find(({ key }) => key === '904').game, 'lmu');
+  assert.equal(getReminderMessages(eventId).length, 1);
+  assert.equal(interaction.posts[0].payload.content, '@here');
+  assert.deepEqual(interaction.posts[0].payload.allowedMentions, { parse: ['everyone'] });
+  assert.match(interaction.replies.at(-1).content, /Posted 1 reminder/);
+  assert.match(interaction.replies.at(-1).content, /To enable @here notifications, grant me the Mention @everyone, @here, and All Roles permission in this channel/);
 });

@@ -106,7 +106,8 @@ module.exports = {
       return interaction.editReply(`I cannot access <#${channel.id}>. Choose a text or announcement channel in this server.`);
     }
     const botMember = await guild.members.fetchMe().catch(() => null);
-    const missing = botMember && selectedChannel.permissionsFor(botMember)?.missing(botPermissions);
+    const permissions = botMember && selectedChannel.permissionsFor(botMember);
+    const missing = permissions?.missing(botPermissions);
     if (!missing || missing.length) {
       return interaction.editReply(`I need View Channel, Send Messages, and Embed Links in <#${channel.id}> before I can post reminders there.`);
     }
@@ -118,6 +119,7 @@ module.exports = {
     const published = await publishChannelReminders(interaction.client, interaction.guildId, channel.id);
     return interaction.editReply(`Reminders for ${game === 'both' ? 'both games' : gameLabel(game)} will post in <#${channel.id}> - ${teamLabel(selected.team)}.`
       + (published.sent ? ` Posted ${published.sent} reminder${published.sent === 1 ? '' : 's'} for upcoming special events.` : '')
+      + (permissions.has(PermissionFlagsBits.MentionEveryone) ? '' : ' To enable @here notifications, grant me the Mention @everyone, @here, and All Roles permission in this channel.')
       + (skippedForeign ? ` Skipped ${skippedForeign} existing reminder post${skippedForeign === 1 ? '' : 's'} created by another bot; this bot can only update its own posts.` : '')
       + (published.failures ? ' Settings were saved, but some upcoming event reminders could not be sent. Run this command again to retry or check the bot logs for details.' : '')
       + (failures ? ' Settings were saved, but some existing posts could not be refreshed. Check the bot logs for details.' : ''));

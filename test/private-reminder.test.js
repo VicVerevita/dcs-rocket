@@ -91,6 +91,10 @@ test('next-day DM RSVP updates the server overview', async () => {
   assert.equal(getResponse(eventId, 'driver').attending, 0);
   assert.equal(serverEdits.length, 2);
   assert.equal(privateEdits.length, 2);
+  for (const message of [...dms, ...serverEdits, ...privateEdits]) {
+    assert.deepEqual(message.allowedMentions, { parse: [] });
+    assert.equal(Object.hasOwn(message, 'content'), false);
+  }
 });
 
 
