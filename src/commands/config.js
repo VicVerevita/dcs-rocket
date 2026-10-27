@@ -12,6 +12,7 @@ const {
 const { gameChoices, gameLabel } = require('../utils/eventLabels');
 const { teamChoices, isTeam, teamLabel } = require('../domain/teams');
 const { refreshChannelReminderMessages } = require('../reminders/interactions');
+const { publishChannelReminders } = require('../reminders/scheduler');
 const botPermissions = [
   PermissionFlagsBits.ViewChannel,
   PermissionFlagsBits.SendMessages,
@@ -114,8 +115,11 @@ module.exports = {
       team === 'all' ? '' : team ?? undefined);
     const selected = getReminderChannels(interaction.guildId).find(({ key }) => key === channel.id);
     const { failures, skippedForeign } = await refreshChannelReminderMessages(interaction.client, interaction.guildId, channel.id);
+    const published = await publishChannelReminders(interaction.client, interaction.guildId, channel.id);
     return interaction.editReply(`Reminders for ${game === 'both' ? 'both games' : gameLabel(game)} will post in <#${channel.id}> - ${teamLabel(selected.team)}.`
+      + (published.sent ? ` Posted ${published.sent} reminder${published.sent === 1 ? '' : 's'} for upcoming special events.` : '')
       + (skippedForeign ? ` Skipped ${skippedForeign} existing reminder post${skippedForeign === 1 ? '' : 's'} created by another bot; this bot can only update its own posts.` : '')
+      + (published.failures ? ' Settings were saved, but some upcoming event reminders could not be sent. Run this command again to retry or check the bot logs for details.' : '')
       + (failures ? ' Settings were saved, but some existing posts could not be refreshed. Check the bot logs for details.' : ''));
   },
 };

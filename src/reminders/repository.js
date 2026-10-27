@@ -15,6 +15,12 @@ const sentReminder = db.prepare(`
   WHERE event_id = ? AND starts_at = ? AND lead_days = ? AND channel_id = ?
 `);
 
+const channelReminder = db.prepare(`
+  SELECT 1 FROM special_event_reminders
+  WHERE event_id = ? AND starts_at = ? AND channel_id = ?
+  LIMIT 1
+`);
+
 const latestEditReminder = db.prepare(`
   SELECT MAX(sent_at) AS sent_at
   FROM special_event_reminders
@@ -120,6 +126,10 @@ function getReminderRecord(eventId, startsAt, leadDays, channelId) {
   return sentReminder.get(eventId, startsAt, leadDays, channelId);
 }
 
+function hasReminderForChannel(eventId, startsAt, channelId) {
+  return Boolean(channelReminder.get(eventId, startsAt, channelId));
+}
+
 function getLatestEditReminder(eventId, startsAt, channelId) {
   return latestEditReminder.get(eventId, startsAt, channelId).sent_at;
 }
@@ -179,6 +189,7 @@ function saveResponse(response) {
 module.exports = {
   getUpcomingSpecialEvents,
   getReminderRecord,
+  hasReminderForChannel,
   getNextEditLeadDays,
   getLatestEditReminder,
   recordReminder,

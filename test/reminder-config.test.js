@@ -1,4 +1,4 @@
-const { test, after } = require('node:test');
+const { test, after, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -28,6 +28,7 @@ const channelPermissions = new PermissionsBitField([
 
 function makeInteraction(action, channelId = '789', game = 'lmu', permitted = true, canPost = true, team = null) {
   const replies = [];
+  const posts = [];
   const channel = {
     id: channelId,
     guildId: '123',
@@ -43,7 +44,16 @@ function makeInteraction(action, channelId = '789', game = 'lmu', permitted = tr
     memberPermissions: new PermissionsBitField(permitted ? PermissionFlagsBits.ManageGuild : 0n),
     client: {
       user: { id: 'bot' },
-      channels: { fetch: async () => ({ messages: { fetch: async () => ({ edit: async () => {} }) } }) },
+      channels: { fetch: async (id) => ({
+        guildId: '123',
+        isTextBased: () => true,
+        send: async (payload) => {
+          const message = { id: `${id}-${posts.length + 1}`, author: { id: 'bot' } };
+          posts.push({ channelId: id, payload, message });
+          return message;
+        },
+        messages: { fetch: async () => ({ author: { id: 'bot' }, edit: async () => {}, delete: async () => {} }) },
+      }) },
     },
     options: {
       getSubcommand: () => action,
@@ -51,11 +61,16 @@ function makeInteraction(action, channelId = '789', game = 'lmu', permitted = tr
       getString: (name) => name === 'team' ? team : game,
     },
     replies,
+    posts,
     reply: async (reply) => { replies.push(reply); },
     deferReply: async (reply) => { replies.push(reply); },
     editReply: async (reply) => { replies.push(typeof reply === 'string' ? { content: reply } : reply); },
   };
 }
+
+afterEach(() => {
+  db.exec('DELETE FROM events');
+});
 
 after(() => {
   db.close();
@@ -202,4 +217,81 @@ test('editing All teams to Main confirms the saved setting and skips original-bo
   assert.equal(edited.length, 1);
   assert.match(edited[0].embeds[0].toJSON().description, /\*\*Signup team:\*\* Main team/);
   assert.equal(getReminderMessages(eventId).length, 2);
+});
+
+test('saving a channel announces matching existing events only there and adds new game matches without duplicates', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const races = ['iracing', 'lmu'].map((game) => createEvent({
+    guildId: '123', game, eventType: 'special_event', title: `${game} race`,
+    startsAt: now + 30 * 86400, dateOnlyUntil: null, track: 'Spa', carClass: 'GT3',
+    details: null, createdBy: 'staff', createdAt: now - 86400,
+  }));
+  setReminderChannel('123', '902', null, 'main');
+  const interaction = makeInteraction('set', '901', 'lmu', true, true, 'academy');
+
+  await config.execute(interaction);
+  assert.match(interaction.replies.at(-1).content, /Posted 1 reminder for upcoming special events/);
+  assert.deepEqual(interaction.posts.map(({ channelId }) => channelId), ['901']);
+  assert.equal(getReminderMessages(races[0]).length, 0);
+  assert.deepEqual(getReminderMessages(races[1]).map(({ lead_days, channel_id, team }) => ({ lead_days, channel_id, team })), [
+    { lead_days: 0, channel_id: '901', team: 'academy' },
+  ]);
+  assert.match(interaction.posts[0].payload.embeds[0].toJSON().description, /Signup team:\*\* Academy team/);
+  assert.match(interaction.posts[0].payload.components[0].toJSON().components[0].custom_id,
+    new RegExp(`:team:academy:123:${races[1]}$`));
+
+  await config.execute(interaction);
+  assert.equal(interaction.posts.length, 1);
+  assert.doesNotMatch(interaction.replies.at(-1).content, /Posted/);
+
+  interaction.options.getString = (name) => name === 'team' ? null : 'both';
+  await config.execute(interaction);
+  assert.equal(interaction.posts.length, 2);
+  assert.deepEqual(interaction.posts.map(({ channelId }) => channelId), ['901', '901']);
+  assert.match(interaction.posts[1].payload.embeds[0].toJSON().title, /iracing race/);
+  assert.equal(getReminderMessages(races[0])[0].team, 'academy');
+  assert.match(interaction.replies.at(-1).content, /Posted 1 reminder/);
+
+  interaction.options.getSubcommand = () => 'remove';
+  await config.execute(interaction);
+  interaction.options.getSubcommand = () => 'set';
+  await config.execute(interaction);
+  assert.equal(interaction.posts.length, 2);
+});
+
+test('a failed initial announcement saves channel settings and repeating the command retries it', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const eventId = createEvent({
+    guildId: '123', game: 'lmu', eventType: 'special_event', title: 'Retry race',
+    startsAt: now + 30 * 86400, dateOnlyUntil: null, track: 'Spa', carClass: 'GT3',
+    details: null, createdBy: 'staff', createdAt: now,
+  });
+  const interaction = makeInteraction('set', '903', 'lmu', true, true, 'community');
+  const fetch = interaction.client.channels.fetch;
+  interaction.client.channels.fetch = async () => ({
+    guildId: '123', isTextBased: () => true,
+    send: async () => { throw new Error('Send failed'); },
+  });
+  const errors = [];
+  const originalError = console.error;
+  console.error = (...args) => { errors.push(args); };
+  try {
+    await config.execute(interaction);
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(errors.length, 1);
+  assert.deepEqual(getReminderChannels('123').find(({ key }) => key === '903'), {
+    key: '903', game: 'lmu', team: 'community',
+  });
+  assert.equal(getReminderMessages(eventId).length, 0);
+  assert.match(interaction.replies.at(-1).content, /Settings were saved, but some upcoming event reminders could not be sent/);
+  assert.match(interaction.replies.at(-1).content, /Run this command again to retry/);
+
+  interaction.client.channels.fetch = fetch;
+  await config.execute(interaction);
+  assert.equal(interaction.posts.length, 1);
+  assert.equal(getReminderMessages(eventId)[0].team, 'community');
+  assert.match(interaction.replies.at(-1).content, /Posted 1 reminder/);
+  assert.doesNotMatch(interaction.replies.at(-1).content, /could not be sent/);
 });
