@@ -103,6 +103,8 @@ function overviewFields(event, responses) {
 function buildReminderMessage(event, leadDays, responses, team = '') {
   const heading = leadDays < 0
     ? 'Event updated - please check your plans'
+    : leadDays === 0
+    ? 'Special event available - sign up now'
     : leadDays === 7 && isLateEvent(event)
     ? 'New special event - sign up now'
     : `${leadDays} day${leadDays === 1 ? '' : 's'} away`;

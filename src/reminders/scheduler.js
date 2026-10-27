@@ -7,6 +7,7 @@ const {
   getEventResponses,
   getReminderMessages,
   getReminderRecord,
+  hasReminderForChannel,
   getNextEditLeadDays,
   getLatestEditReminder,
   recordReminder,
@@ -20,7 +21,7 @@ const { checkPrivateReminders } = require('./private');
 const LEAD_DAYS = [7, 3, 1];
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const SEND_HOUR = 9;
-const inFlight = new Set();
+const inFlight = new Map();
 
 async function deletePreviousReminders(client, eventId, channel, channelId, messageId) {
   const botId = client.user?.id;
@@ -60,9 +61,15 @@ async function deletePreviousReminders(client, eventId, channel, channelId, mess
 }
 
 async function sendReminder(client, event, channelId, leadDays, now, team = '') {
-  const key = `${event.id}:${event.starts_at}:${leadDays}:${channelId}`;
-  if (inFlight.has(key) || getReminderRecord(event.id, event.starts_at, leadDays, channelId)) return;
-  inFlight.add(key);
+  const key = `${event.id}:${event.starts_at}:${channelId}`;
+  while (inFlight.has(key)) {
+    if (leadDays >= 0) return;
+    // An explicit event update must follow any post already being delivered.
+    await inFlight.get(key);
+  }
+  if (getReminderRecord(event.id, event.starts_at, leadDays, channelId)) return;
+  let complete;
+  inFlight.set(key, new Promise((resolve) => { complete = resolve; }));
   try {
     const channel = await client.channels.fetch(channelId);
     if (!channel || channel.guildId !== event.guild_id || !channel.isTextBased()
@@ -83,11 +90,31 @@ async function sendReminder(client, event, channelId, leadDays, now, team = '') 
       team,
     });
     await deletePreviousReminders(client, event.id, channel, channelId, message.id);
+    return true;
   } catch (error) {
     console.error(`Could not send ${leadDays}-day reminder for event #${event.id} in channel ${channelId}:`, error);
+    return false;
   } finally {
     inFlight.delete(key);
+    complete();
   }
+}
+
+async function publishChannelReminders(client, guildId, channelId, now = DateTime.now().setZone(defaultTimeZone)) {
+  const result = { sent: 0, failures: 0 };
+  if (!guildIds.includes(guildId)) return result;
+  const channel = getReminderChannels(guildId).find(({ key }) => key === channelId);
+  if (!channel) return result;
+
+  for (const event of getUpcomingSpecialEvents(Math.floor(now.toSeconds()))) {
+    if (event.guild_id !== guildId || (channel.game && channel.game !== event.game)) continue;
+    if (hasReminderForChannel(event.id, event.starts_at, channelId)) continue;
+    // Stage zero announces an existing event without consuming a scheduled stage.
+    const sent = await sendReminder(client, event, channelId, 0, now, channel.team);
+    if (sent === true) result.sent++;
+    if (sent === false) result.failures++;
+  }
+  return result;
 }
 
 async function publishLateReminder(client, eventId, guildId) {
@@ -100,7 +127,7 @@ async function publishLateReminder(client, eventId, guildId) {
   for (const channel of getReminderChannels(guildId)) {
     if (channel.game && channel.game !== event.game) continue;
     const channelId = channel.key;
-    if (LEAD_DAYS.some((days) => getReminderRecord(event.id, event.starts_at, days, channelId))) continue;
+    if (hasReminderForChannel(event.id, event.starts_at, channelId)) continue;
     await sendReminder(client, event, channelId, 7, now, channel.team);
   }
 }
@@ -134,18 +161,19 @@ async function checkReminders(client, now = DateTime.now().setZone(defaultTimeZo
       if (channel.game && channel.game !== event.game) continue;
       const channelId = channel.key;
       const editAnnouncement = getLatestEditReminder(event.id, event.starts_at, channelId);
-      if (late && !editAnnouncement
-        && !LEAD_DAYS.some((days) => getReminderRecord(event.id, event.starts_at, days, channelId))) {
+      if (late && !hasReminderForChannel(event.id, event.starts_at, channelId)) {
         await sendReminder(client, event, channelId, 7, now, channel.team);
       }
       if (now.hour < SEND_HOUR) continue;
 
       const firstPost = getReminderRecord(event.id, event.starts_at, 7, channelId);
-      const announcedToday = late && firstPost && isSameLocalDay(firstPost.sent_at, now);
+      const channelAnnouncement = getReminderRecord(event.id, event.starts_at, 0, channelId);
+      const announcedToday = (late && firstPost && isSameLocalDay(firstPost.sent_at, now))
+        || (channelAnnouncement && isSameLocalDay(channelAnnouncement.sent_at, now));
       for (const leadDays of LEAD_DAYS) {
         if (eventDay.minus({ days: leadDays }).toISODate() !== today) continue;
         if (editAnnouncement && isSameLocalDay(editAnnouncement, now)) continue;
-        if (announcedToday && leadDays !== 7) continue;
+        if (announcedToday) continue;
         await sendReminder(client, event, channelId, leadDays, now, channel.team);
       }
     }
@@ -179,4 +207,4 @@ function startReminderScheduler(client) {
   setInterval(tick, CHECK_INTERVAL_MS);
 }
 
-module.exports = { checkReminders, publishLateReminder, publishEditedReminder, startReminderScheduler };
+module.exports = { checkReminders, publishChannelReminders, publishLateReminder, publishEditedReminder, startReminderScheduler };
