@@ -4,7 +4,7 @@ const { defaultTimeZone } = require('../config');
 const INPUT_FORMAT = 'dd.MM.yyyy HH:mm';
 const DATE_ONLY_FORMAT = 'dd.MM.yyyy';
 
-function parseEventDateTime(input) {
+function parseEventDateTime(input, { allowPast = false } = {}) {
   const trimmed = input.trim();
   const range = trimmed.split(/\s+to\s+/i);
   const dateOnly = /^\d{2}\.\d{2}\.\d{4}$/.test(range[0]);
@@ -36,7 +36,7 @@ function parseEventDateTime(input) {
     return { ok: false, error: 'The end date must be on or after the start date.' };
   }
 
-  if ((dateOnlyUntil ?? unix) <= Math.floor(Date.now() / 1000)) {
+  if (!allowPast && (dateOnlyUntil ?? unix) <= Math.floor(Date.now() / 1000)) {
     return {
       ok: false,
       error: 'The event date or start time must be in the future.',
@@ -46,7 +46,17 @@ function parseEventDateTime(input) {
   return { ok: true, unix, dateOnlyUntil };
 }
 
+function parseLeagueDateRange(input, options) {
+  const value = input.trim();
+  if (!value) return { ok: true, unix: null, dateOnlyUntil: null };
+  if (!/^\d{2}\.\d{2}\.\d{4}(?:\s+to\s+\d{2}\.\d{2}\.\d{4})?$/i.test(value)) {
+    return { ok: false, error: 'Use DD.MM.YYYY to DD.MM.YYYY, or leave the league dates blank.' };
+  }
+  return parseEventDateTime(value, options);
+}
+
 function discordTimestamp(unix, dateOnlyUntil = null) {
+  if (unix == null) return 'Dates to be announced';
   if (dateOnlyUntil === null) return `<t:${unix}:F> (<t:${unix}:R>)`;
 
   const start = DateTime.fromSeconds(unix, { zone: defaultTimeZone }).toFormat(DATE_ONLY_FORMAT);
@@ -57,5 +67,6 @@ function discordTimestamp(unix, dateOnlyUntil = null) {
 module.exports = {
   INPUT_FORMAT,
   parseEventDateTime,
+  parseLeagueDateRange,
   discordTimestamp,
 };
