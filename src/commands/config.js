@@ -26,7 +26,7 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommandGroup((group) => group
       .setName('reminders')
-      .setDescription('Choose where special-event reminders are posted')
+      .setDescription('Choose where special-event and league reminders are posted')
       .addSubcommand((subcommand) => subcommand
         .setName('set')
         .setDescription('Add a reminder channel or change its game and team')
@@ -118,7 +118,7 @@ module.exports = {
     const { failures, skippedForeign } = await refreshChannelReminderMessages(interaction.client, interaction.guildId, channel.id);
     const published = await publishChannelReminders(interaction.client, interaction.guildId, channel.id);
     return interaction.editReply(`Reminders for ${game === 'both' ? 'both games' : gameLabel(game)} will post in <#${channel.id}> - ${teamLabel(selected.team)}.`
-      + (published.sent ? ` Posted ${published.sent} reminder${published.sent === 1 ? '' : 's'} for upcoming special events.` : '')
+      + (published.sent ? ` Posted ${published.sent} reminder${published.sent === 1 ? '' : 's'} for upcoming special events and leagues.` : '')
       + (permissions.has(PermissionFlagsBits.MentionEveryone) ? '' : ' To enable @here notifications, grant me the Mention @everyone, @here, and All Roles permission in this channel.')
       + (skippedForeign ? ` Skipped ${skippedForeign} existing reminder post${skippedForeign === 1 ? '' : 's'} created by another bot; this bot can only update its own posts.` : '')
       + (published.failures ? ' Settings were saved, but some upcoming event reminders could not be sent. Run this command again to retry or check the bot logs for details.' : '')

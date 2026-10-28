@@ -4,6 +4,7 @@ const { gameLabel } = require('../utils/eventLabels');
 const { isLateEvent } = require('./timing');
 const { teamChoices, isTeam, teamLabel } = require('../domain/teams');
 const { buildRsvpId } = require('./context');
+const { buildLeagueReminderMessage, buildLeaguePrivateReminder } = require('../ui/leagueMessages');
 
 const { DAYS, selectedValues } = require('../domain/rsvp');
 
@@ -101,6 +102,7 @@ function overviewFields(event, responses) {
 }
 
 function buildReminderMessage(event, leadDays, responses, team = '') {
+  if (event.event_type === 'league') return buildLeagueReminderMessage(event, leadDays, responses, team);
   const heading = leadDays < 0
     ? 'Event updated - please check your plans'
     : leadDays === 0
@@ -143,6 +145,7 @@ function buildReminderMessage(event, leadDays, responses, team = '') {
 }
 
 function buildPrivateReminderMessage(event, response, team = response?.team || '') {
+  if (event.event_type === 'league') return buildLeaguePrivateReminder(event, response, team);
   const current = response?.attending
     ? `Driving: ${response.days} - ${response.car_class}${response.availability_hours ? ` - ${response.availability_hours}` : ''}`
     : response ? 'Not driving' : 'No response yet';

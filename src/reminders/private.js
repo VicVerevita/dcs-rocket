@@ -7,6 +7,8 @@ const {
   schedulePrivateReminder,
 } = require('./repository');
 const { buildPrivateReminderMessage } = require('./messages');
+const { getReminderEvent } = require('./eventContext');
+const { eventDeadline } = require('../domain/eventSchedule');
 
 const inFlight = new Set();
 
@@ -16,7 +18,8 @@ function nextPrivateReminderAt(now = DateTime.now().setZone(defaultTimeZone)) {
 
 function requestPrivateReminder(event, userId, now = DateTime.now().setZone(defaultTimeZone), team = '') {
   const remindAt = nextPrivateReminderAt(now);
-  if (remindAt >= (event.date_only_until ?? event.starts_at)) {
+  const deadline = eventDeadline(event);
+  if (deadline !== null && remindAt >= deadline) {
     return { ok: false, error: 'This event ends before tomorrow at 09:00, so a next-day reminder is unavailable.' };
   }
   schedulePrivateReminder({
@@ -37,11 +40,12 @@ async function checkPrivateReminders(client, now = DateTime.now().setZone(defaul
     if (inFlight.has(key)) continue;
     inFlight.add(key);
     try {
-      if (nowSeconds < (reminder.date_only_until ?? reminder.starts_at)) {
+      const deadline = eventDeadline(reminder);
+      if (deadline === null || nowSeconds < deadline) {
         const user = await client.users.fetch(reminder.user_id);
         const response = getResponse(reminder.event_id, reminder.user_id);
         await user.send(buildPrivateReminderMessage(
-          { ...reminder, id: reminder.event_id },
+          getReminderEvent({ ...reminder, id: reminder.event_id }),
           response,
           response ? response.team : reminder.team,
         ));

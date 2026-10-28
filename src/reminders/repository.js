@@ -1,13 +1,16 @@
 const db = require('../db/database');
 
 const upcomingEvents = db.prepare(`
-  SELECT id, guild_id, game, title, starts_at, date_only_until,
-         track, car_class, details, created_at
-  FROM events
-  WHERE event_type = 'special_event'
-    AND status = 'scheduled'
-    AND starts_at > ?
-  ORDER BY starts_at
+  SELECT e.*, s.prequal_kind, s.prequal_starts_at, s.prequal_date_only_until, s.prequal_details
+  FROM events e LEFT JOIN league_settings s ON s.league_id = e.id
+  WHERE e.status = 'scheduled' AND (
+    (e.event_type = 'special_event' AND e.starts_at > @now)
+    OR (e.event_type = 'league' AND (
+      COALESCE(e.date_only_until, e.starts_at) IS NULL
+      OR COALESCE(e.date_only_until, e.starts_at) > @now
+    ))
+  )
+  ORDER BY e.starts_at IS NULL, e.starts_at, e.id
 `);
 
 const sentReminder = db.prepare(`
@@ -47,7 +50,9 @@ const reminderMessages = db.prepare(`
 `);
 
 const channelReminderEvents = db.prepare(`
-  SELECT DISTINCT e.* FROM events e
+  SELECT DISTINCT e.*, s.prequal_kind, s.prequal_starts_at, s.prequal_date_only_until, s.prequal_details
+  FROM events e
+  LEFT JOIN league_settings s ON s.league_id = e.id
   JOIN special_event_reminders r ON r.event_id = e.id
   WHERE e.guild_id = ? AND r.channel_id = ? AND r.deleted_at IS NULL
 `);
@@ -78,11 +83,13 @@ const upsertPrivateReminder = db.prepare(`
 const pendingPrivateReminders = db.prepare(`
   SELECT r.event_id, r.user_id, r.remind_at, r.requested_at, r.team,
          e.guild_id, e.game, e.event_type, e.title, e.starts_at,
-         e.date_only_until, e.track, e.car_class, e.details, e.created_at
+         e.date_only_until, e.track, e.car_class, e.details, e.created_at,
+         s.prequal_kind, s.prequal_starts_at, s.prequal_date_only_until, s.prequal_details
   FROM special_event_private_reminders r
   JOIN events e ON e.id = r.event_id
+  LEFT JOIN league_settings s ON s.league_id = e.id
   WHERE r.sent_at IS NULL AND r.remind_at <= @now AND e.status = 'scheduled'
-    AND e.event_type = 'special_event'
+    AND e.event_type IN ('special_event', 'league')
 `);
 
 const markPrivateReminderSent = db.prepare(`
@@ -118,28 +125,28 @@ const upsertResponse = db.prepare(`
     team = excluded.team
 `);
 
-function getUpcomingSpecialEvents(now) {
-  return upcomingEvents.all(now);
+function getUpcomingReminderEvents(now) {
+  return upcomingEvents.all({ now });
 }
 
 function getReminderRecord(eventId, startsAt, leadDays, channelId) {
-  return sentReminder.get(eventId, startsAt, leadDays, channelId);
+  return sentReminder.get(eventId, startsAt ?? 0, leadDays, channelId);
 }
 
 function hasReminderForChannel(eventId, startsAt, channelId) {
-  return Boolean(channelReminder.get(eventId, startsAt, channelId));
+  return Boolean(channelReminder.get(eventId, startsAt ?? 0, channelId));
 }
 
 function getLatestEditReminder(eventId, startsAt, channelId) {
-  return latestEditReminder.get(eventId, startsAt, channelId).sent_at;
+  return latestEditReminder.get(eventId, startsAt ?? 0, channelId).sent_at;
 }
 
 function getNextEditLeadDays(eventId, startsAt, channelId) {
-  return nextEditLeadDays.get(eventId, startsAt, channelId).lead_days;
+  return nextEditLeadDays.get(eventId, startsAt ?? 0, channelId).lead_days;
 }
 
 function recordReminder(reminder) {
-  insertReminder.run({ team: '', authorId: null, ...reminder });
+  insertReminder.run({ team: '', authorId: null, ...reminder, startsAt: reminder.startsAt ?? 0 });
 }
 
 function getReminderMessages(eventId, startsAt) {
@@ -181,13 +188,23 @@ function getResponse(eventId, userId) {
   return existingResponse.get(eventId, userId);
 }
 
-function saveResponse(response) {
-  const team = response.team ?? getResponse(response.eventId, response.userId)?.team ?? '';
+const saveResponse = db.transaction((response) => {
+  const previous = getResponse(response.eventId, response.userId);
+  const team = response.team ?? previous?.team ?? '';
   upsertResponse.run({ ...response, team, updatedAt: Math.floor(Date.now() / 1000) });
-}
+  // A deliberate return from Not interested to Interested re-enables a previous
+  // withdrawal. Completion remains permanent across ordinary response changes.
+  if (previous?.attending === 0 && response.attending === 1) {
+    db.prepare(`
+      DELETE FROM league_prequalification_reminders
+      WHERE event_id = @eventId AND user_id = @userId AND status = 'withdrawn'
+        AND EXISTS (SELECT 1 FROM events WHERE id = @eventId AND event_type = 'league')
+    `).run({ eventId: response.eventId, userId: response.userId });
+  }
+});
 
 module.exports = {
-  getUpcomingSpecialEvents,
+  getUpcomingReminderEvents,
   getReminderRecord,
   hasReminderForChannel,
   getNextEditLeadDays,

@@ -1,6 +1,7 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const { guildIds, defaultTimeZone } = require('../config');
 const { getEvent } = require('../db/eventRepository');
+const { isOpenForResponses } = require('../domain/eventSchedule');
 const { getReminderChannels } = require('../db/reminderChannelRepository');
 const { teamLabel } = require('../domain/teams');
 const { buildRsvpId, parseRsvpId } = require('./context');
@@ -16,15 +17,15 @@ const {
   saveResponse,
 } = require('./repository');
 const { buildReminderMessage, buildPrivateReminderMessage } = require('./messages');
+const { getReminderEvent } = require('./eventContext');
 const { requestPrivateReminder } = require('./private');
 
-function activeSpecialEvent(interaction) {
+function activeResponseEvent(interaction) {
   const context = parseRsvpId(interaction.customId, interaction.guildId);
   if (!context || !guildIds.includes(context.guildId)) return null;
   const { eventId, guildId } = context;
   const event = getEvent({ eventId, guildId });
-  if (!event || event.event_type !== 'special_event' || event.status !== 'scheduled') return null;
-  if ((event.date_only_until ?? event.starts_at) <= Math.floor(Date.now() / 1000)) return null;
+  if (!event || !isOpenForResponses(event)) return null;
   const previous = getResponse(eventId, interaction.user.id);
   if (interaction.guildId) {
     const configured = getReminderChannels(guildId).find(({ key }) => key === interaction.channelId);
@@ -47,7 +48,7 @@ function responseOptions(interaction, content) {
 
 async function replyUnavailable(interaction) {
   await interaction.reply(responseOptions(interaction,
-    'This special event is no longer available for driver responses.'));
+    'This event or league is no longer available for responses.'));
 }
 
 async function handlePrivateReminderRequest(interaction, { event, previous, team }) {
@@ -58,6 +59,7 @@ async function handlePrivateReminderRequest(interaction, { event, previous, team
 }
 
 async function refreshReminderMessages(client, event, channelId) {
+  const reminderEvent = getReminderEvent(event);
   const channels = getReminderChannels(event.guild_id);
   const result = { failures: 0, skippedForeign: 0 };
   const botId = client.user?.id;
@@ -88,7 +90,7 @@ async function refreshReminderMessages(client, event, channelId) {
         continue;
       }
       await message.edit(buildReminderMessage(
-        event, reminder.lead_days, getEventResponses(event.id), team,
+        reminderEvent, reminder.lead_days, getEventResponses(event.id), team,
       ));
     } catch (error) {
       if (error.code === 10008) {
@@ -132,7 +134,7 @@ async function refreshPrivateMessage(interaction, event) {
   if (interaction.guildId || !interaction.message?.edit) return;
   try {
     await interaction.message.edit(buildPrivateReminderMessage(
-      event, getResponse(event.id, interaction.user.id),
+      getReminderEvent(event), getResponse(event.id, interaction.user.id),
     ));
   } catch (error) {
     console.error(`Could not refresh private reminder for event #${event.id}:`, error);
@@ -169,7 +171,7 @@ async function replyChanged(interaction) {
 }
 
 async function handleReminderButton(interaction) {
-  const context = activeSpecialEvent(interaction);
+  const context = activeResponseEvent(interaction);
   if (!context) return replyUnavailable(interaction);
   const { event, previous, team, fromTeam } = context;
   let { action } = context;
@@ -182,6 +184,18 @@ async function handleReminderButton(interaction) {
     action = action.slice('confirm_'.length);
   } else if ((action === 'yes' || action === 'no') && previous && previous.team !== team) {
     return confirmTeamChange(interaction, context, action);
+  }
+
+  if (event.event_type === 'league' && (action === 'yes' || action === 'no')) {
+    saveResponse({
+      eventId: event.id, userId: interaction.user.id, attending: action === 'yes' ? 1 : 0,
+      days: null, carClass: null, availabilityHours: null, team,
+    });
+    await interaction.reply(responseOptions(interaction,
+      `Saved: you are ${action === 'yes' ? 'interested' : 'not interested'} in this league. You can change your answer later.`));
+    await refreshReminderMessages(interaction.client, event);
+    await refreshPrivateMessage(interaction, event);
+    return;
   }
 
   switch (action) {
@@ -220,8 +234,8 @@ async function handleReminderButton(interaction) {
 }
 
 async function handleReminderModal(interaction) {
-  const context = activeSpecialEvent(interaction);
-  if (!context || context.action !== 'submit') return replyUnavailable(interaction);
+  const context = activeResponseEvent(interaction);
+  if (!context || context.event.event_type !== 'special_event' || context.action !== 'submit') return replyUnavailable(interaction);
   const { event, previous, team, fromTeam } = context;
   if (fromTeam !== undefined ? previous?.team !== fromTeam : previous && previous.team !== team) {
     return replyChanged(interaction);
@@ -248,4 +262,4 @@ async function handleReminderModal(interaction) {
   await refreshPrivateMessage(interaction, event);
 }
 
-module.exports = { handleReminderButton, handleReminderModal, refreshChannelReminderMessages };
+module.exports = { handleReminderButton, handleReminderModal, refreshChannelReminderMessages, refreshReminderMessages };

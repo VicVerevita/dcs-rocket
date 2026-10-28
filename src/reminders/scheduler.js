@@ -1,9 +1,10 @@
 const { DateTime } = require('luxon');
 const { defaultTimeZone, guildIds } = require('../config');
 const { getEvent } = require('../db/eventRepository');
+const { isOpenForResponses, reminderStartKey } = require('../domain/eventSchedule');
 const { getReminderChannels, hasReminderChannels } = require('../db/reminderChannelRepository');
 const {
-  getUpcomingSpecialEvents,
+  getUpcomingReminderEvents,
   getEventResponses,
   getReminderMessages,
   getReminderRecord,
@@ -15,8 +16,10 @@ const {
   removeReminderMessage,
 } = require('./repository');
 const { buildReminderMessage } = require('./messages');
+const { getReminderEvent } = require('./eventContext');
 const { isLateEvent, isSameLocalDay } = require('./timing');
 const { checkPrivateReminders } = require('./private');
+const { checkPrequalificationReminders } = require('./prequalification/scheduler');
 
 const LEAD_DAYS = [7, 3, 1];
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
@@ -61,7 +64,8 @@ async function deletePreviousReminders(client, eventId, channel, channelId, mess
 }
 
 async function sendReminder(client, event, channelId, leadDays, now, team = '') {
-  const key = `${event.id}:${event.starts_at}:${channelId}`;
+  const startsAt = reminderStartKey(event);
+  const key = `${event.id}:${startsAt}:${channelId}`;
   while (inFlight.has(key)) {
     if (leadDays >= 0) return;
     // An explicit event update must follow any post already being delivered.
@@ -77,13 +81,13 @@ async function sendReminder(client, event, channelId, leadDays, now, team = '') 
       throw new Error(`Configured channel ${channelId} is not a text channel in guild ${event.guild_id}`);
     }
     const message = await channel.send({
-      ...buildReminderMessage(event, leadDays, getEventResponses(event.id), team),
+      ...buildReminderMessage(getReminderEvent(event), leadDays, getEventResponses(event.id), team),
       content: '@here',
       allowedMentions: { parse: ['everyone'] },
     });
     recordReminder({
       eventId: event.id,
-      startsAt: event.starts_at,
+      startsAt,
       leadDays,
       channelId,
       messageId: message.id,
@@ -108,7 +112,7 @@ async function publishChannelReminders(client, guildId, channelId, now = DateTim
   const channel = getReminderChannels(guildId).find(({ key }) => key === channelId);
   if (!channel) return result;
 
-  for (const event of getUpcomingSpecialEvents(Math.floor(now.toSeconds()))) {
+  for (const event of getUpcomingReminderEvents(Math.floor(now.toSeconds()))) {
     if (event.guild_id !== guildId || (channel.game && channel.game !== event.game)) continue;
     if (hasReminderForChannel(event.id, event.starts_at, channelId)) continue;
     // Stage zero announces an existing event without consuming a scheduled stage.
@@ -123,14 +127,15 @@ async function publishLateReminder(client, eventId, guildId) {
   if (!guildIds.includes(guildId)) return;
   const event = getEvent({ eventId, guildId });
   const now = DateTime.now().setZone(defaultTimeZone);
-  if (!event || event.event_type !== 'special_event' || event.status !== 'scheduled'
-    || !isLateEvent(event) || now.toSeconds() >= event.starts_at) return;
+  if (!event || !isOpenForResponses(event, now.toSeconds())) return;
+  const league = event.event_type === 'league';
+  if (!league && (!isLateEvent(event) || now.toSeconds() >= event.starts_at)) return;
 
   for (const channel of getReminderChannels(guildId)) {
     if (channel.game && channel.game !== event.game) continue;
     const channelId = channel.key;
     if (hasReminderForChannel(event.id, event.starts_at, channelId)) continue;
-    await sendReminder(client, event, channelId, 7, now, channel.team);
+    await sendReminder(client, event, channelId, league ? 0 : 7, now, channel.team);
   }
 }
 
@@ -138,8 +143,7 @@ async function publishEditedReminder(client, eventId, guildId) {
   if (!guildIds.includes(guildId)) return;
   const event = getEvent({ eventId, guildId });
   const now = DateTime.now().setZone(defaultTimeZone);
-  if (!event || event.event_type !== 'special_event' || event.status !== 'scheduled'
-    || now.toSeconds() >= (event.date_only_until ?? event.starts_at)) return;
+  if (!event || !isOpenForResponses(event, now.toSeconds())) return;
 
   for (const channel of getReminderChannels(guildId)) {
     if (channel.game && channel.game !== event.game) continue;
@@ -152,21 +156,27 @@ async function checkReminders(client, now = DateTime.now().setZone(defaultTimeZo
   if (!now.isValid) throw new Error(`Invalid reminder timezone: ${defaultTimeZone}`);
   const today = now.toISODate();
 
-  for (const event of getUpcomingSpecialEvents(Math.floor(now.toSeconds()))) {
+  for (const event of getUpcomingReminderEvents(Math.floor(now.toSeconds()))) {
     if (!guildIds.includes(event.guild_id)) continue;
     const channels = getReminderChannels(event.guild_id);
     if (channels.length === 0) continue;
-    const eventDay = DateTime.fromSeconds(event.starts_at, { zone: defaultTimeZone });
-    const late = isLateEvent(event);
+    const league = event.event_type === 'league';
+    const eventDay = event.starts_at == null ? null
+      : DateTime.fromSeconds(event.starts_at, { zone: defaultTimeZone });
+    const late = !league && isLateEvent(event);
 
     for (const channel of channels) {
       if (channel.game && channel.game !== event.game) continue;
       const channelId = channel.key;
       const editAnnouncement = getLatestEditReminder(event.id, event.starts_at, channelId);
+      // Leagues are announced immediately, even with no dates or an ongoing season.
+      if (league && !hasReminderForChannel(event.id, event.starts_at, channelId)) {
+        await sendReminder(client, event, channelId, 0, now, channel.team);
+      }
       if (late && !hasReminderForChannel(event.id, event.starts_at, channelId)) {
         await sendReminder(client, event, channelId, 7, now, channel.team);
       }
-      if (now.hour < SEND_HOUR) continue;
+      if (!eventDay || event.starts_at <= now.toSeconds() || now.hour < SEND_HOUR) continue;
 
       const firstPost = getReminderRecord(event.id, event.starts_at, 7, channelId);
       const channelAnnouncement = getReminderRecord(event.id, event.starts_at, 0, channelId);
@@ -194,12 +204,17 @@ function startReminderScheduler(client) {
     try {
       await checkReminders(client);
     } catch (error) {
-      console.error('Special-event reminder check failed:', error);
+      console.error('Event reminder check failed:', error);
     }
     try {
       await checkPrivateReminders(client);
     } catch (error) {
       console.error('Private reminder check failed:', error);
+    }
+    try {
+      await checkPrequalificationReminders(client);
+    } catch (error) {
+      console.error('Pre-qualification reminder check failed:', error);
     } finally {
       running = false;
     }
