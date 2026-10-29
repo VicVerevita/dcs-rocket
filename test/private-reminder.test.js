@@ -15,7 +15,7 @@ process.env.DEFAULT_TIMEZONE = 'Europe/Berlin';
 
 const db = require('../src/db/database');
 const { createEvent } = require('../src/db/eventRepository');
-const { recordReminder, getReminderRecord, getResponse } = require('../src/reminders/repository');
+const { recordReminder, getReminderRecord, getResponse, saveResponse } = require('../src/reminders/repository');
 const { handleReminderButton, handleReminderModal } = require('../src/reminders/interactions');
 const { checkPrivateReminders, nextPrivateReminderAt } = require('../src/reminders/private');
 
@@ -97,6 +97,65 @@ test('next-day DM RSVP updates the server overview', async () => {
   }
 });
 
+
+test('private reminder buttons schedule another next-day DM until the event deadline', async (t) => {
+  let nowMillis = DateTime.now().setZone('Europe/Berlin').startOf('day').set({ hour: 12 }).toMillis();
+  t.mock.method(Date, 'now', () => nowMillis);
+  const now = Math.floor(nowMillis / 1000);
+  const eventId = createEvent({
+    guildId: '123', game: 'iracing', eventType: 'special_event', title: 'Race',
+    startsAt: now + 4 * 24 * 60 * 60, dateOnlyUntil: null,
+    track: 'Spa', carClass: 'GT3', details: null, createdBy: 'staff', createdAt: now,
+  });
+  saveResponse({
+    eventId, userId: 'snoozing-driver', attending: 1, days: 'Saturday',
+    carClass: 'GT3', availabilityHours: null,
+  });
+  const response = getResponse(eventId, 'snoozing-driver');
+  const dms = [];
+  const client = { users: { fetch: async () => ({ send: async (message) => dms.push(message) }) } };
+  const replies = [];
+  const press = (customId, guildId) => handleReminderButton({
+    customId, guildId, user: { id: 'snoozing-driver' }, client,
+    reply: async (message) => replies.push(message),
+  });
+  const reminder = () => db.prepare(`
+    SELECT * FROM special_event_private_reminders WHERE event_id = ? AND user_id = ?
+  `).get(eventId, 'snoozing-driver');
+  const repeatButton = (message) => message.components[0].components
+    .find((button) => button.data.label === 'Remind again tomorrow');
+
+  await press(`special-rsvp:remind_me_again:${eventId}`, '123');
+  const initial = reminder();
+  await checkPrivateReminders(client, DateTime.fromSeconds(initial.remind_at + 1));
+  assert.equal(dms.length, 1);
+  const repeat = repeatButton(dms[0]);
+  assert.ok(repeat);
+  assert.equal(repeat.data.custom_id, `special-rsvp:remind_me_again:123:${eventId}`);
+
+  nowMillis = (initial.remind_at + 60) * 1000;
+  await press(repeat.data.custom_id, null);
+  assert.match(replies.at(-1).content, /tomorrow at or shortly after 09:00/);
+  assert.equal(Object.hasOwn(replies.at(-1), 'flags'), false);
+  const next = reminder();
+  assert.equal(next.remind_at, nextPrivateReminderAt());
+  assert.ok(next.remind_at > initial.remind_at);
+  assert.equal(next.sent_at, null);
+  assert.deepEqual(getResponse(eventId, 'snoozing-driver'), response);
+  await checkPrivateReminders(client, DateTime.fromSeconds(next.remind_at - 1));
+  assert.equal(dms.length, 1);
+  await checkPrivateReminders(client, DateTime.fromSeconds(next.remind_at + 1));
+  await checkPrivateReminders(client, DateTime.fromSeconds(next.remind_at + 2));
+  assert.equal(dms.length, 2);
+
+  nowMillis = (next.remind_at + 60) * 1000;
+  db.prepare('UPDATE events SET starts_at = ? WHERE id = ?').run(nowMillis / 1000 + 60, eventId);
+  const sent = reminder();
+  await press(repeatButton(dms[1]).data.custom_id, null);
+  assert.match(replies.at(-1).content, /ends before tomorrow at 09:00/);
+  assert.deepEqual(reminder(), sent);
+  assert.deepEqual(getResponse(eventId, 'snoozing-driver'), response);
+});
 
 test('next-day 09:00 follows the configured timezone across daylight saving time', () => {
   const now = DateTime.fromISO('2026-03-28T20:00', { zone: 'Europe/Berlin' });
