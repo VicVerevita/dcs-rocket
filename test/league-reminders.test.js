@@ -97,7 +97,7 @@ test('undated leagues announce once, use interest buttons and keep date-free rem
   assert.deepEqual(fx.edits.at(-1).message.allowedMentions, { parse: [] });
 });
 
-test('league reminder DMs send next day without dates and update the same interest record', async () => {
+test('league reminder DMs send next day without dates and update the same interest record', async (t) => {
   const event = league({ tierNames: ['Pro', 'Am'] });
   const fx = fixture();
   await publishLateReminder(fx.client, event.id, '123');
@@ -118,6 +118,24 @@ test('league reminder DMs send next day without dates and update the same intere
   assert.equal(getResponse(event.id, 'driver').attending, 1);
   assert.match(privateEdits[0].embeds[0].data.description, /Your response:\*\* Interested/);
   assert.equal(fx.edits.length, 1);
+
+  t.mock.method(Date, 'now', () => (pending.remind_at + 60) * 1000);
+  const repeat = dm.components[0].components.find((button) => button.data.label === 'Remind again tomorrow');
+  assert.ok(repeat);
+  const replies = await press(event, 'remind_me_again', fx, {
+    channelId: null, customId: repeat.data.custom_id,
+  });
+  assert.match(replies[0].content, /tomorrow at or shortly after 09:00/);
+  const next = db.prepare('SELECT * FROM special_event_private_reminders WHERE event_id = ?').get(event.id);
+  assert.ok(next.remind_at > pending.remind_at);
+  assert.equal(next.team, 'main');
+  assert.equal(next.sent_at, null);
+  assert.equal(getResponse(event.id, 'driver').team, 'main');
+  assert.equal(getResponse(event.id, 'driver').attending, 1);
+  await checkPrivateReminders(fx.client, DateTime.fromSeconds(next.remind_at + 1));
+  await checkPrivateReminders(fx.client, DateTime.fromSeconds(next.remind_at + 2));
+  assert.equal(fx.dms.length, 2);
+  assert.match(fx.dms[1].message.embeds[0].data.description, /Your response:\*\* Interested/);
 });
 
 test('adding, renaming and removing tiers edits the existing reminder without publishing or pinging', async () => {

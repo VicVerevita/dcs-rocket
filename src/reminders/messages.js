@@ -170,6 +170,10 @@ function buildPrivateReminderMessage(event, response, team = response?.team || '
       .setCustomId(buildRsvpId('no', event, { team, privateMessage: true }))
       .setLabel("Can't drive")
       .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId(buildRsvpId('remind_me_again', event, { team, privateMessage: true }))
+      .setLabel('Remind again tomorrow')
+      .setStyle(ButtonStyle.Secondary),
   );
   return { embeds: [embed], components: [buttons], allowedMentions: { parse: [] } };
 }

@@ -25,9 +25,9 @@ function leagueButtons(event, team, privateMessage = false) {
     new ButtonBuilder().setCustomId(buildRsvpId('no', event, { team, privateMessage }))
       .setLabel('Not interested').setStyle(ButtonStyle.Danger),
   );
-  if (!privateMessage) buttons.addComponents(
-    new ButtonBuilder().setCustomId(buildRsvpId('remind_me_again', event, { team }))
-      .setLabel('Remind me again').setStyle(ButtonStyle.Secondary),
+  buttons.addComponents(
+    new ButtonBuilder().setCustomId(buildRsvpId('remind_me_again', event, { team, privateMessage }))
+      .setLabel(privateMessage ? 'Remind again tomorrow' : 'Remind me again').setStyle(ButtonStyle.Secondary),
   );
   return buttons;
 }
